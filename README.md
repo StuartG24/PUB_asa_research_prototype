@@ -1,2 +1,211 @@
-# asa_research_prototype
-Research Prototype - Artificial Social Agent
+# asa-research-prototype
+
+> Research prototype for a basic **Artificial Social Agent** — a [uv](https://docs.astral.sh/uv/)-managed, packaged Python project.
+
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/release/python-3120/)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+---
+
+## About
+
+`asa-research-prototype` is the development repository for a research prototype of a basic
+Artificial Social Agent, built as part of PhD work on empathic human–robot interaction.
+
+**This is currently the scaffold only.** The agent itself is not yet written: the package
+contains a placeholder `Greeter` and a test suite that proves the packaging, tooling and
+environment all work end to end. Everything here exists so that real agent code has somewhere
+well-formed to land. See [Roadmap](docs/roadmap.md) for what is planned.
+
+It is a **packaged** project — it has a `[build-system]`, so `uv sync` builds and installs it
+into the local `.venv`. That is what makes `import asa` resolve everywhere (tests, notebooks,
+the console script) with no `sys.path` manipulation.
+
+### A note on the three names
+
+They deliberately differ, and it helps to know which is which:
+
+| Name | Where it appears |
+| ---- | ---------------- |
+| `asa_research_prototype` | the repository and directory |
+| `asa-research-prototype` | the distribution — `pyproject.toml`, `CITATION.cff`, `uv pip show` |
+| `asa` | the import — `from asa import Greeter` |
+
+The short import name comes from `[tool.uv.build-backend] module-name` in
+[`pyproject.toml`](pyproject.toml), which overrides uv's default of deriving the module
+directory from the project name.
+
+---
+
+## Documentation
+
+| Document | Covers |
+| -------- | ------ |
+| This README | What the project is, how to install it, how to run it |
+| [Architecture](docs/architecture.md) | How the pieces fit together, plus a file-by-file walkthrough |
+| [Design decisions](docs/decisions.md) | Why it is built this way — numbered, append-only |
+| [Roadmap](docs/roadmap.md) | What is built, and the planned extensions |
+
+---
+
+## Project structure
+
+```text
+asa_research_prototype/
+├── src/asa/            # The importable package
+│   ├── greeter.py      # Greeter — placeholder hello-world class
+│   ├── cli.py          # main() — the `asa` console command
+│   └── __main__.py     # enables `python -m asa`
+├── tests/              # pytest suite
+├── docs/               # Architecture notes, design decisions and roadmap
+├── notebooks/          # Exploratory & prototype notebooks
+├── data_in/            # Input data — contents gitignored, kept via .gitkeep
+├── data_results/       # Results data — contents gitignored, kept via .gitkeep
+└── pyproject.toml      # Metadata, dependencies, tool config (ruff, autopep8, pytest)
+```
+
+---
+
+## Prerequisites
+
+- **Python 3.12** — provisioned automatically by uv (see `.python-version`); no manual install needed.
+- **[uv](https://docs.astral.sh/uv/)** — the package & environment manager:
+
+  ```bash
+  # macOS / Linux
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # or with Homebrew
+  brew install uv
+  ```
+
+---
+
+## Getting started
+
+```bash
+# 1. Clone
+git clone https://github.com/StuartG24/asa_research_prototype.git
+cd asa_research_prototype
+
+# 2. Create the environment, install dependencies, build and install the package
+uv sync
+```
+
+uv reads `.python-version`, provisions Python 3.12 (downloading it if necessary), creates a
+local `.venv/`, installs the locked dependencies, and installs this project itself in **editable**
+mode — so edits to `src/asa/` take effect immediately, with no re-sync.
+
+One `uv sync` is enough: the `dev` group includes the `notebook` group, so test, lint and
+notebook tooling all arrive together. CI that wants none of it can use `--no-default-groups`.
+
+You don't need to activate the venv — prefix commands with `uv run` and they execute inside the
+project environment.
+
+---
+
+## Usage
+
+```bash
+uv run asa               # the `asa` console script
+uv run python -m asa     # the module entry point (same output)
+```
+
+Both print `Hello, World!`. They prove different things, which is why both exist: the console
+script exercises the whole packaging path (`[project.scripts]` → installed entry point), while
+`python -m asa` bypasses that and tests only that the package imports and its `__main__` shim
+works. If packaging broke, the first would fail and the second would still pass.
+
+**Work in notebooks:**
+
+```bash
+uv run jupyter lab
+```
+
+Notebooks in `notebooks/` execute from the repo root (set in `.vscode/settings.json`), so
+relative paths like `data_in/…` resolve. `import asa` works from anywhere regardless, because
+the package is installed.
+
+---
+
+## Development
+
+**Lint** — ruff, configured in `pyproject.toml`:
+
+```bash
+uv run ruff check .          # lint
+uv run ruff check --fix .    # lint and apply safe autofixes
+```
+
+**Format** — autopep8, *not* `ruff format`:
+
+```bash
+uv run autopep8 --diff --recursive src/ tests/       # preview
+uv run autopep8 --in-place --recursive src/ tests/   # apply
+```
+
+The split is deliberate: ruff lints and sorts imports; autopep8 formats, because it enforces
+PEP 8 while leaving hand-arranged function signatures alone, whereas `ruff format` re-stacks
+parameters all-or-nothing. Note the different path arguments — ruff excludes `.venv/` and
+gitignored paths by default, autopep8 does not, so it is scoped to `src/ tests/` rather than `.`.
+
+In VS Code, autopep8 runs on save and ruff sorts imports on save
+(see [`.vscode/settings.json`](.vscode/settings.json)). The recommended extensions are listed in
+[`.vscode/extensions.json`](.vscode/extensions.json).
+
+**Manage dependencies** (edits `pyproject.toml`, updates `uv.lock`, syncs `.venv` in one step):
+
+```bash
+uv add <package>                     # runtime dependency
+uv add --group dev <package>         # dev-only tool
+uv add --group notebook <package>    # notebook-only tool
+uv remove <package>
+```
+
+> `uv.lock` and `.python-version` are committed for reproducibility — don't edit them by hand.
+> After pulling changes, run `uv sync` to bring your environment up to date.
+
+---
+
+## Configuration
+
+Secrets and environment-specific settings are read from a local `.env` file (gitignored):
+
+```bash
+cp .env.example .env
+```
+
+Nothing is required yet — the scaffold reads no environment variables. See
+[`.env.example`](.env.example) for the conventions to follow as the prototype grows.
+
+---
+
+## Testing
+
+The suite uses [pytest](https://docs.pytest.org/), installed with the `dev` dependency group.
+Run it from the repo root:
+
+```bash
+uv run pytest              # run everything
+uv run pytest -vv -rA -l   # verbose: full summary, plus local variables on failure
+```
+
+| Test file | Covers |
+| --------- | ------ |
+| [`tests/test_greeter.py`](tests/test_greeter.py) | `Greeter` via the public `from asa` API, so a refactor that keeps the re-export won't break it |
+| [`tests/test_cli.py`](tests/test_cli.py) | smoke test — `main()` prints the greeting, captured with `capsys` |
+| [`tests/test_lint.py`](tests/test_lint.py) | runs `ruff check` across the repo as a test, so `uv run pytest` is also the lint gate |
+
+Configuration lives in `pyproject.toml` under `[tool.pytest.ini_options]`. Note there is no
+`pythonpath` setting: because the project is installed into `.venv`, `import asa` resolves
+without putting the repo root on `sys.path`.
+
+In VS Code, the **Testing** panel (the flask icon) discovers and runs the same tests.
+
+---
+
+## License
+
+This project is licensed under the **Apache License 2.0** — see [LICENSE](LICENSE) for the full
+text. Copyright © 2026 Stuart Gow.
