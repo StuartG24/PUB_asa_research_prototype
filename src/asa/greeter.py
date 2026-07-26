@@ -1,3 +1,8 @@
+#
+# Greeter Class Placeholder
+#
+
+
 """A minimal hello-world class — placeholder until real ASA code arrives."""
 
 

@@ -1,0 +1,27 @@
+{
+    // uv creates the environment at ./.venv — point VS Code at it explicitly.
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+
+    // Scoped to this project, overriding the stricter global setting. "standard" still
+    // catches real bugs without flagging "unknown type" from under-typed dependencies.
+    "python.analysis.typeCheckingMode": "standard",
+
+    // Notebooks execute from the repo root so relative paths like data_in/ resolve.
+    "jupyter.notebookFileRoot": "${workspaceFolder}",
+
+    // Formatter = autopep8, NOT ruff: autopep8 keeps hand-arranged signatures.
+    // Ruff stays on as linter + import-sorter. Extensions: ms-python.autopep8 + charliermarsh.ruff.
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.autopep8",
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+
+    // PyTest setup
+    "python.testing.pytestArgs": ["tests"],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}

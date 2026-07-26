@@ -1,0 +1,13 @@
+{
+    // Extensions collaborators are prompted to install for this project's toolchain.
+    //   ms-python.python    – core Python support
+    //   ms-toolsai.jupyter  – notebooks in notebooks/
+    //   charliermarsh.ruff  – linter + import sorter
+    //   ms-python.autopep8  – formatter (chosen over ruff format; see pyproject.toml)
+    "recommendations": [
+        "ms-python.python",
+        "ms-toolsai.jupyter",
+        "charliermarsh.ruff",
+        "ms-python.autopep8"
+    ]
+}
