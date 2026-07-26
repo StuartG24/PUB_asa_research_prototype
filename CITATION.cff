@@ -1,0 +1,29 @@
+# Citation File Format — https://citation-file-format.github.io/
+# GitHub reads this file and renders a "Cite this repository" button in the
+# repo sidebar, with BibTeX and APA export.
+#
+# TODO: add `orcid:` under the author, and `doi:` if the work is ever archived
+# (e.g. Zenodo).
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: asa-research-prototype
+abstract: >-
+  A uv-managed, packaged Python project developing a research prototype of a
+  basic Artificial Social Agent, undertaken as part of PhD work on empathic
+  human–robot interaction. This release is the project scaffold — packaging,
+  tooling, test suite and documentation — ahead of the agent implementation.
+type: software
+authors:
+  - family-names: Gow
+    given-names: Stuart
+    email: gowstuart@gmail.com
+version: 0.1.0
+date-released: 2026-07-26   # keep in step with the annotated tag for this version
+license: Apache-2.0
+repository-code: "https://github.com/StuartG24/asa_research_prototype"
+keywords:
+  - artificial-social-agent
+  - human-robot-interaction
+  - social-robotics
+  - empathy
+  - research-prototype

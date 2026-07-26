@@ -58,9 +58,9 @@ asa_research_prototype/
 │   ├── greeter.py      # Greeter — placeholder hello-world class
 │   ├── cli.py          # main() — the `asa` console command
 │   └── __main__.py     # enables `python -m asa`
+├── notebooks/          # Exploratory & prototype notebooks
 ├── tests/              # pytest suite
 ├── docs/               # Architecture notes, design decisions and roadmap
-├── notebooks/          # Exploratory & prototype notebooks
 ├── data_in/            # Input data — contents gitignored, kept via .gitkeep
 ├── data_results/       # Results data — contents gitignored, kept via .gitkeep
 └── pyproject.toml      # Metadata, dependencies, tool config (ruff, autopep8, pytest)
