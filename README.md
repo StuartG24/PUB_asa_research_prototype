@@ -11,8 +11,7 @@
 
 ## About
 
-`asa-research-prototype` is the development repository for a research prototype of a basic
-Artificial Social Agent, built as part of PhD work on empathic human–robot interaction.
+As a first step in investigating empathic social robots, a research prototype (`asa-research-prototype`) will be used to examine and refine a proposed framework for social interaction and to explore candidate technology solutions and evaluation approaches. The technology basis for the prototype will be the incremental building of an Artificial Social Agent.
 
 **This is currently the scaffold only.** The agent itself is not yet written: the package
 contains a placeholder `Greeter` and a test suite that proves the packaging, tooling and
