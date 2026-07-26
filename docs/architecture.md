@@ -62,25 +62,40 @@ resolves `import lib.*` by putting the repo root on the path instead.
 
 ---
 
-## Project structure at a glance
-
-| Path | What it is |
-| ---- | ---------- |
-| [`src/asa/__init__.py`](../src/asa/__init__.py) | The package's public API — re-exports `Greeter`, sets `__version__` from the installed metadata, declares `__all__` |
-| [`src/asa/greeter.py`](../src/asa/greeter.py) | `Greeter` — the placeholder hello-world class |
-| [`src/asa/cli.py`](../src/asa/cli.py) | `main()` — what both command-line entry points call |
-| [`src/asa/__main__.py`](../src/asa/__main__.py) | Three lines enabling `python -m asa` |
-| [`tests/`](../tests) | pytest suite — see the table below |
-| [`docs/`](.) | This document, [Design decisions](decisions.md), [Roadmap](roadmap.md) |
-| `notebooks/` | Exploratory and prototype notebooks; executes from the repo root |
-| `data_in/`, `data_results/` | Data in and out — contents gitignored, directories kept via `.gitkeep` |
-| [`pyproject.toml`](../pyproject.toml) | Metadata, build backend, dependency groups, and all tool config (ruff, autopep8, pytest) |
-| [`.vscode/`](../.vscode) | Shared editor config — interpreter, formatter, test discovery, recommended extensions |
-| `uv.lock` | Exact resolved dependency versions; committed, never hand-edited |
-
----
-
 ## File-by-file
+
+### Project structure at a glance
+
+```text
+asa_research_prototype/
+├── src/                        # Packaged source — installed into .venv, so `import asa` works anywhere
+│   └── asa/                    #   the importable package (name set by module-name in pyproject.toml)
+│       ├── __init__.py         #     public API: Greeter, __version__ (read from installed metadata)
+│       ├── greeter.py          #     Greeter — the placeholder hello-world class
+│       ├── cli.py              #     main() — what both command-line entry points call
+│       └── __main__.py         #     three-line shim enabling `python -m asa`
+├── tests/                      # pytest suite
+│   ├── test_greeter.py         #   Greeter via the public `from asa` API
+│   ├── test_cli.py             #   smoke test: main() prints the greeting (capsys)
+│   └── test_lint.py            #   runs `ruff check` as a test — pytest doubles as the lint gate
+├── docs/                       # Project documentation
+│   ├── architecture.md         #   this file — entry points, imports, file-by-file walkthrough
+│   ├── decisions.md            #   the numbered design decisions (why it is built this way)
+│   └── roadmap.md              #   what is built, and what is planned
+├── notebooks/                  # Exploratory & prototype notebooks (execute from the repo root)
+├── data_in/                    # Input data — contents gitignored, kept via .gitkeep
+├── data_results/               # Results data — contents gitignored, kept via .gitkeep
+├── .vscode/                    # Editor settings — shared, portable project config
+│   ├── settings.json           #   interpreter path, autopep8 on save, Pylance "standard"
+│   └── extensions.json         #   recommended extensions for this toolchain
+├── pyproject.toml              # Metadata, build backend, dependency groups, tool config (ruff, autopep8, pytest)
+├── uv.lock                     # Pinned dependency versions (committed for reproducibility)
+├── .python-version             # Pinned Python version (3.12)
+├── .env.example                # Template listing environment variables (none needed yet)
+├── CITATION.cff                # Citation metadata — GitHub's "Cite this repository" button
+├── LICENSE                     # Apache-2.0
+└── README.md                   # Front door — what it is, install, run
+```
 
 ### `src/asa/__init__.py` — the public API
 
