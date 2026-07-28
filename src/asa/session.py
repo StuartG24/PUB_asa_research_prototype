@@ -60,6 +60,14 @@ class ASASession:
         log.info("Session starting - host %s", self.host)
 
         self.furhat = AsyncFurhatClient(host=self.host)
+
+        # The client attaches its own stderr handler in __init__ and leaves propagation on,
+        # so every record is emitted twice — its format on stderr, ours on stdout. Drop its
+        # handler and let the single root handler from setup_logging do the formatting.
+        # This must run after *every* construction: the client only adds the handler
+        # "if not self.logger.handlers", so a later client would put it straight back.
+        logging.getLogger("AsyncFurhatClient").handlers.clear()
+
         # The client's own logger is separate from ours — it carries the websocket
         # frame traffic, which is very noisy at DEBUG.
         self.furhat.set_logging_level(self._client_log_level)
@@ -106,6 +114,31 @@ class ASASession:
         """Speak one utterance, interrupting anything already in progress."""
         await self._client.request_speak_text(text=text, wait=True, abort=True)
 
+    async def gesture(self, name: str, intensity: float = 1.0,
+                      duration: float = 1.0, *, wait: bool = False) -> None:
+        """Play a named gesture — "Smile", "BigSmile", "Blink" and the rest of the set.
+
+        ``wait`` defaults to False, unlike say(), so the gesture runs *alongside* whatever
+        follows rather than blocking it. Smiling while speaking is one turn, not two. Pass
+        wait=True when the next action genuinely must not begin until the face has settled.
+        """
+        if wait:
+            await self._client.request_gesture_start(name=name, intensity=intensity,
+                                                     duration=duration, wait=True)
+            return
+
+        # The client ties its "monitor" protocol flag to `wait`, so asking it not to block
+        # also silences response.gesture.start/end and the handlers never fire — unlike
+        # speech, which reports back unconditionally. Send the event directly with
+        # monitoring on: the callbacks arrive, we simply do not wait on them.
+        await self._client.send_event({
+            "type": Events.request_gesture_start,
+            "name": name,
+            "intensity": intensity,
+            "duration": duration,
+            "monitor": True,
+        })
+
     # ── Handlers ─────────────────────────────────────────────────────────────
     #
     # Internals, kept below the public surface: nothing outside the class calls these.
@@ -129,9 +162,17 @@ class ASASession:
     def _register_handlers(self) -> None:
         self._client.add_handler(Events.response_speak_start, self._on_speak_start)
         self._client.add_handler(Events.response_speak_end, self._on_speak_end)
+        self._client.add_handler(Events.response_gesture_start, self._on_gesture_start)
+        self._client.add_handler(Events.response_gesture_end, self._on_gesture_end)
 
     async def _on_speak_start(self, event) -> None:
         log.debug("Furhat started speaking: %s", event)
 
     async def _on_speak_end(self, event) -> None:
         log.debug("Furhat finished speaking: %s", event)
+
+    async def _on_gesture_start(self, event) -> None:
+        log.debug("Furhat started gesturing: %s", event)
+
+    async def _on_gesture_end(self, event) -> None:
+        log.debug("Furhat finished gesturing: %s", event)

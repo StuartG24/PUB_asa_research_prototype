@@ -185,6 +185,8 @@ returns `None` and both exit 0; the point is that the two entry paths cannot div
 | Test file | Covers |
 | --------- | ------ |
 | [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that an unreachable Furhat exits 1 rather than raising; and that `run_session` stops the session when the interaction fails but not when the start does |
+| [`test_session.py`](../tests/test_session.py) | `ASASession` against a fake client — the hand-built gesture event asks for monitoring, both connect failures map to `FurhatUnreachable`, `stop()` is idempotent, handlers are registered, the library's stderr handler is stripped |
+| [`test_furhat_integration.py`](../tests/test_furhat_integration.py) | One end-to-end round trip against a live robot. Skipped automatically when nothing is serving on port 9000 |
 | [`test_lint.py`](../tests/test_lint.py) | Runs `ruff check .` across the repo as a test, so `uv run pytest` doubles as the lint gate |
 
 `test_lint.py` invokes ruff as `sys.executable -m ruff` rather than a bare `ruff`, so it resolves
@@ -196,3 +198,9 @@ test suite.
 The unreachable-Furhat test stubs `ASASession` rather than pointing at a dead address. A test
 that relied on nothing listening would silently invert its meaning the day a Furhat *is* running
 locally, and would then connect to it and make the robot speak.
+
+`test_furhat_integration.py` deliberately **skips** rather than fails when no robot is serving on
+port 9000, so the suite stays green with the SDK closed — which is its normal state. It earns its
+place despite that fragility because it is the only test that can catch protocol drift: a fake
+will accept `monitor: True` forever even if the Furhat stops honouring it. Everything else about
+the session is covered by `test_session.py` against a fake, in milliseconds.

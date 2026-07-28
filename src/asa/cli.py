@@ -90,4 +90,7 @@ async def interaction(session: ASASession) -> None:
     It takes an already-started session rather than creating one, so it never has to care
     how the connection was made, and the same body can be pasted into a notebook cell.
     """
+    # gesture() does not wait, so the smile plays *while* the line is spoken rather than
+    # before it — one turn rather than two.
+    await session.gesture("Smile", intensity=0.6, duration=2.0)
     await session.say("Hello, this is a second test")
