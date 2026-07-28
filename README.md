@@ -193,7 +193,18 @@ uv run pytest -vv -rA -l   # verbose: full summary, plus local variables on fail
 | Test file | Covers |
 | --------- | ------ |
 | [`tests/test_cli.py`](tests/test_cli.py) | argument parsing, and that an unreachable Furhat exits 1 instead of raising |
+| [`tests/test_session.py`](tests/test_session.py) | `ASASession` against a fake client — actions, lifecycle and error mapping, with no robot and no network |
+| [`tests/test_furhat_integration.py`](tests/test_furhat_integration.py) | one live round trip — connect, gesture, speak, disconnect. **Skipped** unless a Furhat is serving on port 9000 |
 | [`tests/test_lint.py`](tests/test_lint.py) | runs `ruff check` across the repo as a test, so `uv run pytest` is also the lint gate |
+
+Everything except the integration test runs in milliseconds and needs nothing installed or
+running. The integration test skips itself when nothing answers on port 9000, so the suite stays
+green with the Furhat SDK closed — start the launcher to include it, and note that it makes the
+robot speak. To see which tests were skipped and why:
+
+```bash
+uv run pytest -rs
+```
 
 Configuration lives in `pyproject.toml` under `[tool.pytest.ini_options]`. Note there is no
 `pythonpath` setting: because the project is installed into `.venv`, `import asa` resolves

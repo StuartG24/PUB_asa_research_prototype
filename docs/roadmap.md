@@ -16,8 +16,8 @@ Relative links below are written from the repository root.
       distribution name `asa-research-prototype`
 - [x] **Package entry points** — a CLI entry point (`asa`) and a `-m` shim
       ([`src/asa/`](../src/asa))
-- [x] **Tests** — pytest suite covering the CLI, and ruff lint as a test
-      ([`tests/`](../tests))
+- [x] **Tests** — pytest suite covering the CLI and the session (against a fake client), a
+      skip-guarded live Furhat round trip, and ruff lint as a test ([`tests/`](../tests))
 - [x] **Tooling** — ruff as linter and import-sorter, autopep8 as formatter, both configured in
       `pyproject.toml` and wired into VS Code ([`.vscode/`](../.vscode))
 - [x] **Repository hygiene** — curated `.gitignore`, `.env.example`, data directories kept via

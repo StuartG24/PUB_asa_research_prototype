@@ -86,6 +86,8 @@ asa_research_prototype/
 │           └── portcheck.py        #       live Jupyter kernels, port holders, stale-file cleanup
 ├── tests/                      # pytest suite
 │   ├── test_cli.py             #   argument parsing, and the clean exit on an unreachable Furhat
+│   ├── test_session.py         #   ASASession against a fake client — no robot, no network
+│   ├── test_furhat_integration.py  # one live round trip; skipped unless a Furhat is serving
 │   └── test_lint.py            #   runs `ruff check` as a test — pytest doubles as the lint gate
 ├── docs/                       # Project documentation
 │   ├── architecture.md         #   this file — entry points, imports, file-by-file walkthrough
