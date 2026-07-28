@@ -142,6 +142,22 @@ neither belongs in the vocabulary of code that just wants to talk to a robot.
 a test drive `main()` without argparse picking up the *host* process's arguments, which is
 otherwise unavoidable under pytest.
 
+The work is split three ways on purpose, mirroring how a notebook is used:
+
+| Function | Responsibility |
+| -------- | -------------- |
+| `main()` | Arguments, logging, and the one `asyncio.run()` — the only place a loop is created |
+| `run_session()` | Lifecycle: start, then the interaction, then stop in a `finally` |
+| `interaction()` | The script — what the agent actually says and does |
+
+`interaction()` receives an already-started session rather than creating one, so the same body
+can be pasted into a notebook cell. Keeping the script here rather than on `ASASession` means the
+session class owns the connection and the actions, but never decides on the conversation.
+
+`run_session()` uses an explicit `try`/`finally` rather than `async with`, which is exactly
+equivalent, because the three phases are the thing worth reading in a composition root. `start()`
+sits *outside* the `try`: a connection that never opened has nothing to close.
+
 It carries no `if __name__ == "__main__":` guard: the console-script wrapper and `__main__.py`
 each own their own entry path, so the guard would only ever fire for `python src/asa/cli.py`,
 which is not a way anyone invokes a packaged project.
@@ -168,7 +184,7 @@ returns `None` and both exit 0; the point is that the two entry paths cannot div
 
 | Test file | Covers |
 | --------- | ------ |
-| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`) and that an unreachable Furhat exits 1 rather than raising |
+| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that an unreachable Furhat exits 1 rather than raising; and that `run_session` stops the session when the interaction fails but not when the start does |
 | [`test_lint.py`](../tests/test_lint.py) | Runs `ruff check .` across the repo as a test, so `uv run pytest` doubles as the lint gate |
 
 `test_lint.py` invokes ruff as `sys.executable -m ruff` rather than a bare `ruff`, so it resolves

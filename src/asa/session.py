@@ -10,13 +10,17 @@ Async by design: the realtime client is a websocket client, so every action is
 awaitable. This class never calls ``asyncio.run`` itself — the caller owns the
 event loop, which is what lets the same class run from both entry points:
 
-- CLI, no loop yet::
-    asyncio.run(ASASession().run())
+- CLI, no loop yet — see ``asa.cli.run_session``::
+    asyncio.run(run_session(host, level))
 
 - Notebook, loop already running (``asyncio.run`` would raise there)::
     session = await ASASession().start()
     await session.say("Hello")
     await session.stop()
+
+The class provides the connection and the actions; it does not decide *what to say*.
+That script lives in the caller — ``asa.cli.interaction`` for the CLI, the middle cells
+of a notebook — so the two never have to agree on a conversation.
 """
 
 import logging
@@ -49,6 +53,7 @@ class ASASession:
         self.furhat: AsyncFurhatClient | None = None
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
+    #
 
     async def start(self) -> "ASASession":
         """Open the websocket and register the event handlers."""
@@ -94,27 +99,39 @@ class ASASession:
         # rather than leaking the websocket.
         await self.stop()
 
+    # ── Actions ──────────────────────────────────────────────────────────────
+    #
+
+    async def say(self, text: str) -> None:
+        """Speak one utterance, interrupting anything already in progress."""
+        await self._client.request_speak_text(text=text, wait=True, abort=True)
+
     # ── Handlers ─────────────────────────────────────────────────────────────
+    #
+    # Internals, kept below the public surface: nothing outside the class calls these.
+    # They are registered by start() and cleared by stop().
+
+    @property
+    def _client(self) -> AsyncFurhatClient:
+        """The connected client, or a clear error if the session was never started.
+
+        A type checker narrows within a method but not across method boundaries, so it
+        cannot see that say() is only ever reached after start() — every use of the
+        Optional attribute is flagged. Narrowing here once avoids an assert or an ignore
+        in every method, and turns a bare "NoneType has no attribute ..." into a message
+        that names the actual mistake — easy to make when start and the actions live in
+        separate notebook cells.
+        """
+        if self.furhat is None:
+            raise RuntimeError("Session not started — call start() first")
+        return self.furhat
 
     def _register_handlers(self) -> None:
-        self.furhat.add_handler(Events.response_speak_start, self._on_speak_start)
-        self.furhat.add_handler(Events.response_speak_end, self._on_speak_end)
+        self._client.add_handler(Events.response_speak_start, self._on_speak_start)
+        self._client.add_handler(Events.response_speak_end, self._on_speak_end)
 
     async def _on_speak_start(self, event) -> None:
         log.debug("Furhat started speaking: %s", event)
 
     async def _on_speak_end(self, event) -> None:
         log.debug("Furhat finished speaking: %s", event)
-
-    # ── Actions ──────────────────────────────────────────────────────────────
-
-    async def say(self, text: str) -> None:
-        """Speak one utterance, interrupting anything already in progress."""
-        await self.furhat.request_speak_text(text=text, wait=True, abort=True)
-
-    # ── Conversation ─────────────────────────────────────────────────────────
-
-    async def run(self) -> None:
-        """The whole session: connect, converse, disconnect."""
-        async with self:
-            await self.say("Hello, this is a second test")
