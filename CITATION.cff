@@ -17,8 +17,8 @@ authors:
   - family-names: Gow
     given-names: Stuart
     email: gowstuart@gmail.com
-version: 0.1.0
-date-released: 2026-07-26   # keep in step with the annotated tag for this version
+version: 0.2.0
+date-released: 2026-07-28   # keep in step with the annotated tag for this version
 license: Apache-2.0
 repository-code: "https://github.com/StuartG24/asa_research_prototype"
 keywords:
