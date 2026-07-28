@@ -14,9 +14,9 @@ Relative links below are written from the repository root.
       ([`pyproject.toml`](../pyproject.toml))
 - [x] **Short import name** — `[tool.uv.build-backend] module-name = "asa"`, keeping the
       distribution name `asa-research-prototype`
-- [x] **Placeholder package** — `Greeter`, a CLI entry point (`asa`) and a `-m` shim
+- [x] **Package entry points** — a CLI entry point (`asa`) and a `-m` shim
       ([`src/asa/`](../src/asa))
-- [x] **Tests** — pytest suite covering the greeter, the CLI, and ruff lint as a test
+- [x] **Tests** — pytest suite covering the CLI, and ruff lint as a test
       ([`tests/`](../tests))
 - [x] **Tooling** — ruff as linter and import-sorter, autopep8 as formatter, both configured in
       `pyproject.toml` and wired into VS Code ([`.vscode/`](../.vscode))
@@ -25,13 +25,17 @@ Relative links below are written from the repository root.
 - [x] **Documentation** — [README](../README.md), [Architecture](architecture.md),
       [Design decisions](decisions.md), this roadmap, and [`CITATION.cff`](../CITATION.cff)
 
-**Planned — near-term, implied by the scaffold**
+- [x] **Replaced the placeholder** — `Greeter` and its test deleted now that
+      [`session.py`](../src/asa/session.py) has landed; `main()` is a genuine composition root
+      rather than a packaging smoke test
+- [x] **First runtime dependencies** — `furhat-realtime-api` added, exercising the
+      resolve → lock → install path for real
 
-- [ ] **Replace the placeholder** — delete `Greeter` and its test once the first real module
-      lands; the CLI entry point becomes a genuine composition root rather than a packaging smoke
-      test
-- [ ] **First runtime dependencies** — `dependencies` is deliberately empty; the first `uv add`
-      will exercise the resolve → lock → install path for real
+**Planned — near-term**
+
+- [ ] **Furhat connection** — `ASASession` connects, speaks and gestures; next is perception
+      (`request_listen_start` and the `response_hear` event) so a turn can be driven by what the
+      user says rather than a fixed script
 - [ ] **Complete `CITATION.cff`** — add `orcid:`, and a `doi:` if the work is ever archived
       (e.g. Zenodo)
 

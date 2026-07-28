@@ -13,10 +13,9 @@
 
 As a first step in investigating empathic social robots, a research prototype (`asa-research-prototype`) will be used to examine and refine a proposed framework for social interaction and to explore candidate technology solutions and evaluation approaches. The technology basis for the prototype will be the incremental building of an Artificial Social Agent.
 
-**This is currently the scaffold only.** The agent itself is not yet written: the package
-contains a placeholder `Greeter` and a test suite that proves the packaging, tooling and
-environment all work end to end. Everything here exists so that real agent code has somewhere
-well-formed to land. See [Roadmap](docs/roadmap.md) for what is planned.
+**The agent is at an early stage.** The package contains `ASASession`, which opens and owns a
+connection to a (virtual) Furhat robot, alongside a test suite that proves the packaging, tooling
+and environment all work end to end. See [Roadmap](docs/roadmap.md) for what is planned.
 
 It is a **packaged** project — it has a `[build-system]`, so `uv sync` builds and installs it
 into the local `.venv`. That is what makes `import asa` resolve everywhere (tests, notebooks,
@@ -30,7 +29,7 @@ They deliberately differ, and it helps to know which is which:
 | ---- | ---------------- |
 | `asa_research_prototype` | the repository and directory |
 | `asa-research-prototype` | the distribution — `pyproject.toml`, `CITATION.cff`, `uv pip show` |
-| `asa` | the import — `from asa import Greeter` |
+| `asa` | the import — `from asa import ASASession` |
 
 The short import name comes from `[tool.uv.build-backend] module-name` in
 [`pyproject.toml`](pyproject.toml), which overrides uv's default of deriving the module
@@ -54,9 +53,10 @@ directory from the project name.
 ```text
 asa_research_prototype/
 ├── src/asa/            # The importable package
-│   ├── greeter.py      # Greeter — placeholder hello-world class
+│   ├── session.py      # ASASession — one async interaction session with the Furhat
 │   ├── cli.py          # main() — the `asa` console command
-│   └── __main__.py     # enables `python -m asa`
+│   ├── __main__.py     # enables `python -m asa`
+│   └── _tools/         # private dev utilities (logging, dependency report, port check)
 ├── notebooks/          # Exploratory & prototype notebooks
 ├── tests/              # pytest suite
 ├── docs/               # Architecture notes, design decisions and roadmap
@@ -192,8 +192,7 @@ uv run pytest -vv -rA -l   # verbose: full summary, plus local variables on fail
 
 | Test file | Covers |
 | --------- | ------ |
-| [`tests/test_greeter.py`](tests/test_greeter.py) | `Greeter` via the public `from asa` API, so a refactor that keeps the re-export won't break it |
-| [`tests/test_cli.py`](tests/test_cli.py) | smoke test — `main()` prints the greeting, captured with `capsys` |
+| [`tests/test_cli.py`](tests/test_cli.py) | argument parsing, and that an unreachable Furhat exits 1 instead of raising |
 | [`tests/test_lint.py`](tests/test_lint.py) | runs `ruff check` across the repo as a test, so `uv run pytest` is also the lint gate |
 
 Configuration lives in `pyproject.toml` under `[tool.pytest.ini_options]`. Note there is no
