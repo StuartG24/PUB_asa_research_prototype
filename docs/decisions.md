@@ -141,3 +141,69 @@ running, it is slow, and exercising it makes it talk. That shapes every choice b
 
 - **Testing the contents of `interaction()`** — it is a placeholder meant to change every time
   something new is tried. Pinning it would make experimentation cost a test edit.
+
+---
+
+## 3. Configuration, and where shipped data lives
+
+*Implements ASA Design v0.1 §11 and §14.1.*
+
+Configuration for a research prototype is not the same problem as configuration for an
+application. Its job is to make a recorded result attributable: which settings produced this data,
+and can that be reconstructed months later. Every choice below follows from that.
+
+- **Three layers, each winning over the one before** — packaged defaults
+  ([`src/asa/core/defaults.toml`](../src/asa/core/defaults.toml)), then an override file passed as
+  `--config`, then command-line arguments. The override need only carry the keys it changes, so a
+  pilot's config file is a short statement of *what was different*, which is also what you want to
+  quote in a write-up.
+
+- **The command-line layer is applied in `main()` alone**, not inside `load_config()`. The loader
+  therefore knows nothing about `sys.argv`, so a notebook can build a `Config` without inventing a
+  fake command line — the same reasoning that keeps `asyncio.run()` in `main()` alone.
+
+- **`--host` has no argparse default.** It defaults to `None`, meaning *not given*, and
+  `main()` resolves `args.host or config.furhat_host`. A real default there would make the
+  argument always present, and it would then silently beat every configuration file — a bug that
+  presents as "`--config` doesn't work".
+
+- **An unknown key or section raises.** Not a warning, not ignored. The silent version is the
+  dangerous one for research: the run quietly uses the default while your notes record the value
+  you meant to set, and nothing in the results says otherwise.
+
+- **The defaults ship inside the package** and are read through `importlib.resources`, not
+  `__file__` or a relative path, so they resolve from any working directory and from a real
+  install as well as the editable one. Verified: `uv build` puts `asa/core/defaults.toml` in the
+  wheel, so `uv_build` needs no package-data setting.
+
+- **Configuration lives in `core/`.** The membership test for that package is *depended on by
+  everything, depending on nothing* — configuration passes it, since any adapter may read config
+  and config imports nothing from `asa`.
+
+- **Shipped data files sit next to the module that reads them**, rather than being gathered into
+  one configuration directory. `defaults.toml` holds *tunables* — what changes per run.
+  A planned `llm/models.toml` will hold *reference data* — model IDs, pricing, context windows;
+  facts that change when a provider changes its catalogue, not when you run a different trial.
+  Filing them together would imply an interchangeability that does not exist.
+
+### Considered and rejected
+
+- **A config file at the repository root.** It is only findable when the process happens to run
+  from the repo root, so it works from the terminal and fails from a notebook or an installed
+  copy — losing the one property that packaging bought.
+
+- **`pyproject.toml` as the home for settings.** It is build and tooling metadata. Retuning a
+  mapping table for a pilot should not mean editing the file that carries the version and the
+  linter configuration.
+
+- **A top-level `asa/config.py`**, on the grounds that configuration is infrastructure rather than
+  domain. Defensible, but it splits the *depends-on-nothing* group across two places for a
+  distinction nothing else in the codebase acts on.
+
+- **One `config/` directory holding every TOML.** Appealing — a single place to find every knob —
+  but it separates data from the code that consumes it, and would stop `llm/` being
+  self-contained, which matters because that layer is copied to and from `dev-conv-agent` rather
+  than shared as a dependency.
+
+- **Warning on unknown keys rather than raising.** A warning in a research run is a line in a log
+  nobody reads until the results look strange.
