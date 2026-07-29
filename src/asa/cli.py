@@ -20,8 +20,10 @@ And:
 import argparse
 import asyncio
 import logging
+from pathlib import Path
 
 from asa._tools.custom_logging import setup_logging
+from asa.core.config import load_config
 from asa.session import ASASession, FurhatUnreachable
 
 log = logging.getLogger(f"{__name__}.app")
@@ -41,13 +43,20 @@ def main(argv: list[str] | None = None) -> None:
 
     # Setup custom logging
     setup_logging(level=args.log.upper())
-    log.info("ASA Launch")
+
+    # Resolve configuration, then let any explicit argument win over it. Three layers
+    # in all — packaged defaults, override file, command line — and this is the only
+    # place the last one is applied, so load_config() stays usable from a notebook.
+    config = load_config(args.config)
+    host = args.host or config.furhat_host
+
+    log.info("ASA Launch - Design %s, Furhat Host %s", config.design_version, host)
 
     # Run the session. This is the only place that owns an event loop — run_session and
     # ASASession are both loop-agnostic, so a notebook (which already has one) can await
     # the same pieces directly.
     try:
-        asyncio.run(run_session(host=args.host,
+        asyncio.run(run_session(host=host,
                                 client_log_level=getattr(logging, args.log.upper())))
     except FurhatUnreachable as error:
         # An unreachable Furhat is an operator problem, not a defect — one line and a
@@ -62,8 +71,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--log", default="debug",
                         choices=["debug", "info", "warning"],
                         help="log verbosity (default: debug)")
-    parser.add_argument("--host", default="127.0.0.1",
-                        help="Furhat address (default: 127.0.0.1, the virtual Furhat)")
+    # No default: None means "not given", so the configured value shows through.
+    # Putting the default here would make the argument always present and silently beat every config file.
+    parser.add_argument("--host", default=None,
+                        help="Furhat address (default: from configuration)")
+    parser.add_argument("--config", type=Path, default=None, metavar="FILE",
+                        help="TOML file overriding selected configuration keys")
     return parser
 
 

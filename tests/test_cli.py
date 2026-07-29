@@ -16,17 +16,70 @@ from asa.session import FurhatUnreachable
 
 
 def test_defaults():
-    """No arguments gives the virtual Furhat and debug logging."""
+    """No arguments leaves --host unset so the configured value shows through.
+
+    ``None`` rather than an address is the point: a default here would make the argument
+    always present, and it would then beat every configuration file silently.
+    """
     args = build_parser().parse_args([])
-    assert args.host == "127.0.0.1"
+    assert args.host is None
+    assert args.config is None
     assert args.log == "debug"
 
 
 def test_arguments_are_read():
-    """Both options are parsed off the command line."""
+    """The options are parsed off the command line."""
     args = build_parser().parse_args(["--log", "warning", "--host", "10.0.0.5"])
     assert args.host == "10.0.0.5"
     assert args.log == "warning"
+
+
+def test_host_falls_back_to_configuration(monkeypatch):
+    """With no --host, the session is built with the host from configuration."""
+    seen = {}
+
+    class RecordingSession:
+        def __init__(self, host, **kwargs):
+            seen["host"] = host
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    async def nothing(session):
+        pass
+
+    monkeypatch.setattr("asa.cli.ASASession", RecordingSession)
+    monkeypatch.setattr("asa.cli.interaction", nothing)
+
+    main(["--log", "warning"])
+    assert seen["host"] == "127.0.0.1"
+
+
+def test_host_argument_beats_configuration(monkeypatch):
+    """An explicit --host wins over the configured value — the third layer."""
+    seen = {}
+
+    class RecordingSession:
+        def __init__(self, host, **kwargs):
+            seen["host"] = host
+
+        async def start(self):
+            pass
+
+        async def stop(self):
+            pass
+
+    async def nothing(session):
+        pass
+
+    monkeypatch.setattr("asa.cli.ASASession", RecordingSession)
+    monkeypatch.setattr("asa.cli.interaction", nothing)
+
+    main(["--log", "warning", "--host", "10.0.0.5"])
+    assert seen["host"] == "10.0.0.5"
 
 
 def test_rejects_unknown_log_level():

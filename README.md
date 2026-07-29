@@ -56,6 +56,7 @@ asa_research_prototype/
 │   ├── session.py      # ASASession — one async interaction session with the Furhat
 │   ├── cli.py          # main() — the `asa` console command
 │   ├── __main__.py     # enables `python -m asa`
+│   ├── core/           # shared foundations — configuration, and the agent's core types
 │   └── _tools/         # private dev utilities (logging, dependency report, port check)
 ├── notebooks/          # Exploratory & prototype notebooks
 ├── tests/              # pytest suite
@@ -108,13 +109,23 @@ project environment.
 
 ```bash
 uv run asa               # the `asa` console script
-uv run python -m asa     # the module entry point (same output)
+uv run python -m asa     # the module entry point (same behaviour)
 ```
 
-Both print `Hello, World!`. They prove different things, which is why both exist: the console
-script exercises the whole packaging path (`[project.scripts]` → installed entry point), while
-`python -m asa` bypasses that and tests only that the package imports and its `__main__` shim
-works. If packaging broke, the first would fail and the second would still pass.
+Both open a session with the Furhat, play a gesture, speak a line and disconnect. **The Furhat
+launcher must be running** — with nothing serving on port 9000 the command reports one line and
+exits 1 rather than raising.
+
+The two entry points prove different things, which is why both exist: the console script exercises
+the whole packaging path (`[project.scripts]` → installed entry point), while `python -m asa`
+bypasses that and tests only that the package imports and its `__main__` shim works. If packaging
+broke, the first would fail and the second would still pass.
+
+| Option | Effect |
+| ------ | ------ |
+| `--host ADDRESS` | Furhat address. Default comes from configuration — `127.0.0.1`, the virtual Furhat |
+| `--config FILE` | TOML file overriding selected configuration keys (see [Configuration](#configuration)) |
+| `--log {debug,info,warning}` | Log verbosity (default `debug`) |
 
 **Work in notebooks:**
 
@@ -169,14 +180,28 @@ uv remove <package>
 
 ## Configuration
 
-Secrets and environment-specific settings are read from a local `.env` file (gitignored):
+Two separate things, deliberately kept apart.
+
+**Settings** — TOML, in three layers, each winning over the one before:
+
+1. [`src/asa/core/defaults.toml`](src/asa/core/defaults.toml), shipped inside the package so it
+   resolves by module location rather than working directory;
+2. an override file — `uv run asa --config pilots/pilot-2.toml` — which need only carry the keys
+   it changes;
+3. command-line arguments, applied in `main()` alone.
+
+An unknown key or section in an override file is an **error**, not a warning. A mistyped key would
+otherwise leave the default silently in place while your notes record the value you meant to set —
+the sort of thing that invalidates a run without anybody noticing.
+
+**Secrets and environment-specific values** — a local `.env` file (gitignored):
 
 ```bash
 cp .env.example .env
 ```
 
-Nothing is required yet — the scaffold reads no environment variables. See
-[`.env.example`](.env.example) for the conventions to follow as the prototype grows.
+Nothing is required yet: no environment variables are read. See [`.env.example`](.env.example) for
+the conventions to follow as the prototype grows.
 
 ---
 
@@ -192,7 +217,8 @@ uv run pytest -vv -rA -l   # verbose: full summary, plus local variables on fail
 
 | Test file | Covers |
 | --------- | ------ |
-| [`tests/test_cli.py`](tests/test_cli.py) | argument parsing, and that an unreachable Furhat exits 1 instead of raising |
+| [`tests/test_cli.py`](tests/test_cli.py) | argument parsing, the configuration fallback and the CLI override, and that an unreachable Furhat exits 1 instead of raising |
+| [`tests/test_config.py`](tests/test_config.py) | the two-layer configuration load — packaged defaults, partial overrides, and the rejection of unknown keys and sections |
 | [`tests/test_session.py`](tests/test_session.py) | `ASASession` against a fake client — actions, lifecycle and error mapping, with no robot and no network |
 | [`tests/test_furhat_integration.py`](tests/test_furhat_integration.py) | one live round trip — connect, gesture, speak, disconnect. **Skipped** unless a Furhat is serving on port 9000 |
 | [`tests/test_lint.py`](tests/test_lint.py) | runs `ruff check` across the repo as a test, so `uv run pytest` is also the lint gate |

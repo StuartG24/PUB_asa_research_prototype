@@ -80,12 +80,16 @@ asa_research_prototype/
 │       ├── session.py          #     ASASession — one async interaction session with the Furhat
 │       ├── cli.py              #     main() — what both command-line entry points call
 │       ├── __main__.py         #     three-line shim enabling `python -m asa`
+│       ├── core/               #     shared foundations — depended on by everything, depending on nothing
+│       │   ├── config.py       #       load_config() — packaged defaults layered with an override file
+│       │   └── defaults.toml   #       the shipped defaults, read via importlib.resources
 │       └── _tools/             #     private dev utilities, not part of the public API
 │           ├── custom_logging.py   #       setup_logging() — one stdout handler, app loggers raised
 │           ├── depreport.py        #       dependency table with installed version and release date
 │           └── portcheck.py        #       live Jupyter kernels, port holders, stale-file cleanup
 ├── tests/                      # pytest suite
-│   ├── test_cli.py             #   argument parsing, and the clean exit on an unreachable Furhat
+│   ├── test_cli.py             #   argument parsing, config fallback, and the clean exit on an unreachable Furhat
+│   ├── test_config.py          #   the two-layer load — defaults, overrides, unknown keys rejected
 │   ├── test_session.py         #   ASASession against a fake client — no robot, no network
 │   ├── test_furhat_integration.py  # one live round trip; skipped unless a Furhat is serving
 │   └── test_lint.py            #   runs `ruff check` as a test — pytest doubles as the lint gate
@@ -148,7 +152,7 @@ The work is split three ways on purpose, mirroring how a notebook is used:
 
 | Function | Responsibility |
 | -------- | -------------- |
-| `main()` | Arguments, logging, and the one `asyncio.run()` — the only place a loop is created |
+| `main()` | Arguments, logging, configuration, and the one `asyncio.run()` — the only place a loop is created, and the only place a command-line value overrides a configured one |
 | `run_session()` | Lifecycle: start, then the interaction, then stop in a `finally` |
 | `interaction()` | The script — what the agent actually says and does |
 
@@ -186,7 +190,8 @@ returns `None` and both exit 0; the point is that the two entry paths cannot div
 
 | Test file | Covers |
 | --------- | ------ |
-| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that an unreachable Furhat exits 1 rather than raising; and that `run_session` stops the session when the interaction fails but not when the start does |
+| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that `--host` falls back to configuration when absent and beats it when given; that an unreachable Furhat exits 1 rather than raising; and that `run_session` stops the session when the interaction fails but not when the start does |
+| [`test_config.py`](../tests/test_config.py) | The two-layer load — packaged defaults resolve, a partial override leaves other keys alone, an unknown key or section raises, a missing file names its path. Reading the defaults through `importlib.resources` also proves the TOML is reachable from the installed package |
 | [`test_session.py`](../tests/test_session.py) | `ASASession` against a fake client — the hand-built gesture event asks for monitoring, both connect failures map to `FurhatUnreachable`, `stop()` is idempotent, handlers are registered, the library's stderr handler is stripped |
 | [`test_furhat_integration.py`](../tests/test_furhat_integration.py) | One end-to-end round trip against a live robot. Skipped automatically when nothing is serving on port 9000 |
 | [`test_lint.py`](../tests/test_lint.py) | Runs `ruff check .` across the repo as a test, so `uv run pytest` doubles as the lint gate |

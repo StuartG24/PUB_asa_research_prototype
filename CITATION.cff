@@ -10,8 +10,7 @@ title: asa-research-prototype
 abstract: >-
   A uv-managed, packaged Python project developing a research prototype of a
   basic Artificial Social Agent, undertaken as part of PhD work on empathic
-  human–robot interaction. This release is the project scaffold — packaging,
-  tooling, test suite and documentation — ahead of the agent implementation.
+  human–robot interaction.
 type: software
 authors:
   - family-names: Gow
