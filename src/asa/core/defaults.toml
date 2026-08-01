@@ -5,11 +5,11 @@
 # working directory. Override selected keys with `asa --config <file>`.
 
 [project]
-# The design document this build implements — "ASA Design v0.2.1" in the Obsidian
+# The design document this build implements — "ASA Design v0.2.2" in the Obsidian
 # vault. Copied into every run manifest so recorded results point back at the
 # reasoning behind them, not just at the code. A claim, not a check: bump it when
 # the design version bumps.
-design_version = "v0.2.1"
+design_version = "v0.2.2"
 
 [furhat]
 # 127.0.0.1 is the virtual Furhat in the local SDK. A physical robot is its address

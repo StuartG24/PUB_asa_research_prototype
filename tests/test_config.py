@@ -17,7 +17,7 @@ from asa.core.config import load_config
 def test_defaults_load():
     """The shipped defaults resolve with no override file."""
     config = load_config()
-    assert config.design_version == "v0.2.1"
+    assert config.design_version == "v0.2.2"
     assert config.furhat_host == "127.0.0.1"
     assert config.source is None
 
@@ -29,7 +29,7 @@ def test_override_replaces_only_the_keys_given(tmp_path):
 
     config = load_config(override)
     assert config.furhat_host == "10.0.0.5"
-    assert config.design_version == "v0.2.1"     # untouched by the override
+    assert config.design_version == "v0.2.2"     # untouched by the override
     assert config.source == str(override)
 
 
@@ -66,7 +66,7 @@ def test_missing_file_names_the_path(tmp_path):
 def test_as_dict_is_plain_data():
     """The manifest serialises the config with no bespoke code."""
     assert load_config().as_dict() == {
-        "design_version": "v0.2.1",
+        "design_version": "v0.2.2",
         "furhat_host": "127.0.0.1",
         "source": None,
     }
