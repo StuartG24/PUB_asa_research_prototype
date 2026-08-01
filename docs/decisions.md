@@ -63,6 +63,23 @@ Relative links below are written from the repository root.
   `None`. Because ASA is packaged and meant to be imported, that matters more here than in a
   notebook-driven project.
 
+- **In-module section dividers are a rule between two `#` lines**, ruled to a uniform 90 columns:
+
+  ```python
+  #
+  # ── Dates and IDs ───────────────────────────────────────────────────────────────────────
+  #
+  ```
+
+  Adopted when [`core/affect.py`](../src/asa/core/affect.py) grew past the point where its type
+  definitions read as a single list. Comments here rather than docstrings, and the reasoning is
+  the *reverse* of the module-header decision above: a divider groups a file for someone reading
+  it top to bottom, and there is no object for `help()` to attach it to. It is navigation, not
+  API documentation. The uniform width is the part worth stating — three dividers of three
+  different lengths read as an accident rather than a structure, and nothing in the toolchain
+  enforces it. Ruff will not flag drift: `W` is not in `select`, so trailing whitespace and
+  ragged rules are both invisible to `uv run pytest`.
+
 ### Considered and rejected
 
 - **GitHub's stock Python `.gitignore`** — replaced by a curated ~50-line file. Beyond being
