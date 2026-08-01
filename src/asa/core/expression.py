@@ -6,10 +6,11 @@
 
 """The expression representation — what the agent intends to display, before any platform.
 
-The output half of the two-stage mapping. An ``ExpressionEncoder`` turns a ``DesiredSignal``
-(the affect the agent should convey) into an ``ExpressionPlan`` (a platform-NEUTRAL description
-of how to convey it), and an embodiment adapter turns that into Furhat gestures or into the
-primitives of whatever robot comes next. Nothing in this module names a platform.
+The output half of the two-stage mapping. An ``ExpressionEncoder`` turns the agent's own affect
+— ``AffectState.self_``, which the planner is the sole author of — into an ``ExpressionPlan``
+(a platform-NEUTRAL description of how to convey it), and an embodiment adapter turns that into
+Furhat gestures or into the primitives of whatever robot comes next. Nothing here names a
+platform.
 
 A facial expression is a **vector with its vocabulary named**, for the same reason affect is
 (see ``asa.core.affect``). A fixed set of prototype expressions cannot express a *blend* of
@@ -44,7 +45,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 
-from asa.core.affect import AffectVector, _require_aware, utc_now
+from asa.core.affect import _require_aware, utc_now
 
 #
 # ── Vocabulary ──────────────────────────────────────────────────────────────────────────
@@ -155,38 +156,8 @@ class VoiceChannel:
     text: str
 
 #
-# ── Signal and plan ─────────────────────────────────────────────────────────────────────
+# ── The plan ────────────────────────────────────────────────────────────────────────────
 #
-
-
-@dataclass(frozen=True)
-class DesiredSignal:
-    """The affect the agent should CONVEY — the response planner's output.
-
-    A distinct type from ``AffectState`` even though iteration-1 mimicry makes them isomorphic.
-    Empathic responding is frequently not mirroring — sympathy, reassurance and de-escalation
-    all produce a signal that differs from the perceived state — so collapsing the two would
-    hard-code mimicry into the architecture. This one type distinction is the difference
-    between an affect mirror and a prototype that can become an empathic agent.
-
-    ``source``
-        Which planner produced it, ``<role>:<implementation>``. A planned LLM planner is
-        compared against the mimicry stub over the same inputs, and without this the record
-        cannot say which one ran.
-    ``rationale``
-        Why this signal, when it is not a mirror. When the agent looks reassuring at an angry
-        human this is the only record of the reasoning, which for a claim about empathic
-        responding is closer to primary data than a nicety.
-    """
-
-    affect: AffectVector                    # what to CONVEY — not what was perceived
-    source: str = ""                        # "planner:mimicry" | "planner:llm" | …
-    rationale: str | None = None            # free-text why; the mimicry stub leaves it None
-    at: datetime = field(default_factory=utc_now)
-    schema: str = "signal/1"
-
-    def __post_init__(self) -> None:
-        _require_aware("at", self.at)
 
 
 @dataclass(frozen=True)

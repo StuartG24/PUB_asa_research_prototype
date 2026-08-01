@@ -6,7 +6,7 @@
 
 These types are nearly pure data, so a test per field would mostly be testing ``dataclasses``
 rather than this module. Covered instead is the small amount of behaviour the module adds —
-the timezone guards — plus the properties other components will silently depend on: that
+the timezone guard — plus the properties other components will silently depend on: that
 ``FacialPrototype`` members work as ``str`` keys, that the condition parses back from the value
 the config file carries, and the one genuinely new shape, a record that nests three levels deep
 on its way to JSONL.
@@ -21,9 +21,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from asa.core.affect import AffectVector
 from asa.core.expression import (
-    DesiredSignal,
     ExpressionCondition,
     ExpressionPlan,
     FacialChannel,
@@ -35,22 +33,16 @@ from asa.core.expression import (
 NAIVE = datetime(2026, 8, 1, 14, 30)                # no tzinfo — the value under test
 AWARE = datetime(2026, 8, 1, 14, 30, tzinfo=UTC)
 
-HAPPY = AffectVector(space="ekman4/1", values={"happiness": 0.9})
 SMILING = FacialVector(vocabulary="prototype/1", values={"smile": 0.7})
 FACE = FacialChannel(facial=SMILING, duration_s=2.0)
 
 
-def test_desired_signal_rejects_a_naive_timestamp():
-    """A caller-supplied naive ``at`` fails where the record is created, not later."""
-    with pytest.raises(ValueError, match="at must be timezone-aware"):
-        DesiredSignal(affect=HAPPY, source="planner:mimicry", at=NAIVE)
-
-
 def test_expression_plan_rejects_a_naive_timestamp():
-    """The same guard on the plan.
+    """A caller-supplied naive ``at`` fails where the record is created, not later.
 
-    Kept separate from the signal's test rather than parametrised: the two are independent
-    ``__post_init__`` bodies, so either could be dropped without the other's test noticing.
+    The plan is the only timestamped type left in this module. ``DesiredSignal`` carried the
+    same guard until v0.3 deleted it — the planner now publishes its decision as
+    ``AffectEvidence(target=SELF)``, which ``test_affect.py`` already guards.
     """
     with pytest.raises(ValueError, match="at must be timezone-aware"):
         ExpressionPlan(face=FACE, condition=ExpressionCondition.FACE_ONLY, at=NAIVE)
