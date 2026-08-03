@@ -20,6 +20,7 @@ import pytest
 
 from asa.core.affect import (
     AffectEvidence,
+    AffectHistory,
     AffectObservation,
     AffectState,
     AffectVector,
@@ -145,3 +146,82 @@ def test_replace_revalidates():
 def test_observation_is_an_alias_not_a_subclass():
     """Perception produces evidence like anything else, distinguished by ``source``."""
     assert AffectObservation is AffectEvidence
+
+
+#
+# ── AffectHistory — the snapshot the reasoning ports read ───────────────────────────────
+#
+
+
+def a_state(at: datetime = AWARE) -> AffectState:
+    """A throwaway state, for tests whose subject is the history around it."""
+    return AffectState(other=HAPPY, self_=NEUTRAL, at=at)
+
+
+def test_history_rejects_a_naive_timestamp():
+    """``at`` has no default here either, so it carries the same exposure as ``AffectState``."""
+    with pytest.raises(ValueError, match="at must be timezone-aware"):
+        AffectHistory(current=a_state(), states=(), evidence=(), at=NAIVE)
+
+
+def test_history_tolerates_an_empty_window():
+    """The cold start: a belief exists and nothing has happened yet.
+
+    This is the intention planner's very first tick, before any evidence has arrived. It
+    is also why ``current`` is a field rather than ``states[-1]`` — that read would raise
+    here, so every reader wanting only the value now would need an empty-window branch.
+    """
+    history = AffectHistory(current=a_state(), states=(), evidence=(), at=AWARE)
+
+    assert history.states == ()
+    assert history.current.other is HAPPY
+
+
+def test_history_sequences_are_immutable():
+    """The snapshot must not change under a reader, and ``tuple`` is what says so.
+
+    Pinned rather than left to the annotation because the *reason* is several files away:
+    both reasoning ports may hold this across an ``await`` on a language-model call, and a
+    sequence that grew mid-call would give a torn read and an unreproducible appraisal.
+    Someone rewriting the field as ``list`` for convenience would see none of that.
+    """
+    history = AffectHistory(current=a_state(), states=(a_state(),), evidence=(), at=AWARE)
+
+    with pytest.raises(AttributeError):
+        history.states.append(a_state())            # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        history.evidence.append(                    # type: ignore[attr-defined]
+            AffectEvidence(target=Target.OTHER, affect=HAPPY))
+
+
+def test_history_coerces_a_list_to_a_tuple():
+    """The test with teeth: annotations are not enforced at runtime.
+
+    ``states=[...]`` is accepted by the dataclass and Pylance is the only thing objecting,
+    so without ``__post_init__`` normalising it the immutability above is a claim rather
+    than a guarantee — and the likely route in is the affect model assembling its window
+    as a list and never converting it.
+    """
+    history = AffectHistory(current=a_state(), states=[a_state()],    # type: ignore[arg-type]
+                            evidence=[], at=AWARE)                    # type: ignore[arg-type]
+
+    assert isinstance(history.states, tuple)
+    assert isinstance(history.evidence, tuple)
+
+
+def test_history_asdict_recurses_and_json_returns_lists():
+    """Pins a step-12 comparison gotcha, on the same grounds as the datetime test above.
+
+    ``asdict()`` rebuilds each sequence as its own type, so a ``tuple`` stays a ``tuple``.
+    ``json.dumps`` then writes it as an array, which reads back as a ``list`` — so a record
+    loaded from disk is *not* equal to the record that was written, and any analysis
+    comparing the two fails on the container type rather than on the data.
+    """
+    record = asdict(AffectHistory(current=a_state(), states=(a_state(),),
+                                  evidence=(), at=AWARE))
+
+    assert isinstance(record["states"], tuple)
+    assert record["states"][0]["schema"] == "state/1"
+
+    round_tripped = json.loads(json.dumps(record, default=str))
+    assert isinstance(round_tripped["states"], list)

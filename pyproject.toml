@@ -53,6 +53,7 @@ dev = [
     "ruff>=0.15.20",
     "autopep8>=2.3.2",  # formatter over `ruff format`: preserves hand-arranged signatures (ruff stacks all-or-nothing)
     "pytest>=9.1.1",
+    "pyright[nodejs]>=1.1.411",  # [nodejs] ships node as a wheel: lock-pinned, no download at first run
     { include-group = "notebook" },
 ]
 
@@ -69,6 +70,14 @@ select = ["E", "F", "I", "UP", "B", "Q"]
 # More relaxed about line-length format in Notebooks
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E501"]
+
+# Pylance reads this section too, so the checking mode lives here rather than in
+# .vscode/settings.json — one source of truth for the editor and for tests/test_types.py.
+# "standard" catches real bugs without flagging "unknown type" from under-typed deps.
+[tool.pyright]
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

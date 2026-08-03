@@ -43,7 +43,9 @@ def utc_now() -> datetime:
     """The current instant, timezone-aware UTC.
 
     One named source of "now", so the default timestamps below are a single thing for a
-    test to patch and for the affect model's injectable clock to line up with.
+    test to patch, and one the clocks in the system can line up with. The affect model is
+    not among them — it owns no clock and takes time as a parameter. The clocks belong to
+    the intention planner, to deliberation and to the response loop, all injectable.
     """
     return datetime.now(UTC)
 
@@ -209,17 +211,25 @@ Perception produces evidence like anything else — ``target=OTHER``, no ``ratio
 """
 
 
+#
+# ── State and history ───────────────────────────────────────────────────────────────────
+#
+
+
 @dataclass(frozen=True)
 class AffectState:
     """The model's belief about both parties (self and other) at one instant.
 
-    Self and other are held separately because they age by two different processes: 
-    — the estimate of other's state goes stale as *evidence*, an epistemic decay 
-    — whereas the agent's own affect ages as an emotional one. 
+    Self and other are held separately because they age by two different processes:
+    — the estimate of other's state goes stale as *evidence*, an epistemic decay
+    — whereas the agent's own affect ages as an emotional one.
     Plausibly different time constants and different shapes, so must not be conflated
 
-    Iteration 1 leaves ``self_`` inert: perception only ever targets ``OTHER`` and
-    deliberation does not exist yet. The structure is real; the behaviour arrives later.
+    ``self_`` is written by the intention planner, which publishes its decision as evidence
+    targeted at ``SELF`` rather than commanding an expression — so the agent's own affect is
+    folded and aged like any other belief. Perception and deliberation only ever target
+    ``OTHER``. The rule across the whole architecture: **everything infers about other; only
+    the planner decides self.**
     """
 
     other: AffectVector
@@ -229,3 +239,46 @@ class AffectState:
 
     def __post_init__(self) -> None:
         _require_aware("at", self.at)
+
+
+@dataclass(frozen=True)
+class AffectHistory:
+    """A snapshot of the model's belief and how it got there, for the reasoning ports.
+
+    Both the deliberator and the intention planner read this rather than an ``AffectState``,
+    because a snapshot at an instant cannot express a *change*: sadness at 0.6 looks
+    identical whether it arrived gradually or in one step. The salient input to appraisal and
+    to responding is often the trajectory rather than the value.
+
+    A **copy, never a live handle.** Either reader may be slow — an LLM call can sit behind
+    both — and a handle on state that mutates mid-call gives torn reads and appraisals that
+    cannot be reproduced. ``states`` and ``evidence`` are therefore coerced to ``tuple``
+    below, so the guarantee holds even when the model builds them as lists.
+
+    Coercing rather than rejecting is not a departure from ``_require_aware``'s rule: that
+    one refuses to guess *which clock* a naive datetime meant, whereas ``tuple(a_list)`` is
+    the same sequence in the same order, with one right answer.
+
+    **The sequence is immutable; the snapshot is not deeply so.** Each ``AffectState`` is
+    frozen, but the ``values`` mapping inside its vectors is usually a real ``dict`` — see
+    ``AffectVector``. So the outer guarantee only holds if the affect model treats §9.3's
+    *fold, never overwrite* as producing new ``AffectVector`` objects rather than updating
+    one in place.
+
+    ``current`` is not ``states[-1]``. It is the belief at ``at``, whereas ``states`` is the
+    bounded window behind it, so a reader wanting only the value now never has to handle an
+    empty window. Iteration 1's mimicry planner reads only ``current``, which is what makes
+    it a stub rather than a strategy.
+    """
+
+    current: AffectState                        # the belief at ``at``
+    states: tuple[AffectState, ...]             # oldest first, bounded by config
+    evidence: tuple[AffectEvidence, ...]        # what produced them, same window
+    at: datetime                                # when the snapshot was taken
+    schema: str = "history/1"
+
+    def __post_init__(self) -> None:
+        _require_aware("at", self.at)
+        # frozen, so normalising has to go through object.__setattr__
+        object.__setattr__(self, "states", tuple(self.states))
+        object.__setattr__(self, "evidence", tuple(self.evidence))
