@@ -2,7 +2,7 @@
 # Test - perception
 #
 
-"""Tests for the input port and the text console adapter.
+"""Tests for the producer side: the two ports, the text console adapter and the decoder.
 
 The adapter is a loop around a call, so what is worth testing is not that it reads. It is
 the four things other components rely on: that it satisfies the port at all, that it tags
@@ -10,13 +10,33 @@ its records with its own name, that end of input *ends* rather than raises — s
 what tells the evidence loop it may drain — and that reading does not freeze the event
 loop, which is the one decision in this module that could be "simplified" away with
 nothing failing.
+
+The decoder is tested for its **guards and the shape of what it emits**, never for accuracy.
+Whether a table scores well against labelled sentences is a research measure with its own
+instrument, and a suite that failed when a lexicon scored 62% would be reporting a finding
+as a defect and would be muted within a fortnight. Two other things are deliberately absent:
+any assertion that the two representations agree on the axes they share, since their tables
+are independent by design and such a test would pin data rather than behaviour; and any test
+that ``decode`` needs to be ``async``, since this implementation never awaits and the port's
+asynchrony exists for the LLM decoder — the annotation in the port test is what holds it.
 """
 
 import asyncio
 import time
+from datetime import UTC, datetime
 
-from asa.core.affect import Utterance
-from asa.perception.base import InputSource
+import pytest
+
+from asa.core.affect import AffectObservation, Target, Utterance, utc_now
+from asa.core.representations import BASIC4, EKMAN6
+from asa.perception.base import AffectDecoder, InputSource
+from asa.perception.decode_keyword import (
+    BASIC4_KEYWORDS,
+    DECODER,
+    EKMAN6_KEYWORDS,
+    NO_MATCH,
+    KeywordDecoder,
+)
 from asa.perception.text_console import SOURCE, TextConsole
 
 
@@ -139,3 +159,176 @@ def test_the_blocking_read_does_not_freeze_the_event_loop():
 
     assert ticks > 0, "the event loop was frozen for the whole read"
     assert [utterance.text for utterance in seen] == ["I just got the job!"]
+
+
+#
+# ── Decode & Infer ──────────────────────────────────────────────────────────────────────
+#
+
+
+def _decode(decoder: KeywordDecoder, text: str,
+            at: datetime | None = None) -> tuple[AffectObservation, Utterance]:
+    """Run one sentence through a decoder, returning what it produced and what it was given.
+
+    ``at`` is resolved here rather than passed through as conditional keyword arguments.
+    ``Utterance(..., **({"at": at} if at else {}))`` reads neatly and cannot be type-checked:
+    the checker cannot tell which parameter a dynamically built mapping lands in, so it tries
+    the value against every one of them and reports three errors for one line.
+    """
+    utterance = Utterance(text=text, source=SOURCE,
+                          at=at if at is not None else utc_now())
+    return asyncio.run(decoder.decode(utterance)), utterance
+
+
+def _basic4() -> KeywordDecoder:
+    return KeywordDecoder(BASIC4, BASIC4_KEYWORDS)
+
+
+def _ekman6() -> KeywordDecoder:
+    return KeywordDecoder(EKMAN6, EKMAN6_KEYWORDS)
+
+
+def test_keyword_decoder_satisfies_the_affect_decoder_port():
+    """A static claim again, so the annotation is the test and pyright is the checker.
+
+    It carries more than it looks. ``decode`` is declared ``async`` on the port for the
+    benefit of an LLM implementation, and a maintainer who noticed this decoder never awaits
+    anything could reasonably drop the keyword — at which point every caller would have to
+    change with the implementation, which is the one thing a port exists to prevent. This
+    line fails if that happens, and nothing at runtime would.
+    """
+    decoder: AffectDecoder = _basic4()
+
+    assert decoder is not None      # the annotation above is what actually asserts
+
+
+def test_a_table_naming_axes_the_representation_lacks_is_rejected():
+    """The pairing guard, in both directions, and the type system cannot do this.
+
+    ``StrEnum`` keys interoperate across representations and a table is annotated
+    ``Mapping[str, ...]`` because the port must accept any of them, so pyright sees two
+    compatible arguments. Paired wrongly and unchecked, the decoder would emit vectors
+    claiming one representation and carrying another's axes — malformed records that nothing
+    downstream validates, because nothing downstream can.
+    """
+    with pytest.raises(ValueError, match="ekman6/1 does not have"):
+        KeywordDecoder(EKMAN6, BASIC4_KEYWORDS)
+
+    with pytest.raises(ValueError, match="basic4/1 does not have"):
+        KeywordDecoder(BASIC4, EKMAN6_KEYWORDS)
+
+
+def test_every_axis_of_the_representation_is_present_at_rest():
+    """Full-width output, and the affect model depends on it silently.
+
+    The representation names a basis, so a vector in it carries every axis of that basis.
+    Emitting only the axes that fired would hand the fold an ambiguity — an absent axis
+    meaning either "no claim, leave it alone" or "claimed nothing", which are opposite
+    behaviours — and it would put missing values into the analysis.
+    """
+    got, _ = _decode(_basic4(), "I am happy")
+
+    assert set(got.affect.values) == set(BASIC4.axes)
+    assert got.affect.values["sadness"] == BASIC4.rest
+
+
+def test_each_representation_yields_its_own_axes():
+    """The plumbing test that survives the tables being independent.
+
+    It asserts nothing about *which* magnitudes either produces — that would pin the
+    lexicons rather than the mechanism. What it pins is that one sentence through two
+    decoders comes back in two different bases, each stamped with its own identifier.
+    """
+    from_basic4, _ = _decode(_basic4(), "I was terrified")
+    from_ekman6, _ = _decode(_ekman6(), "I was terrified")
+
+    assert from_basic4.affect.representation == BASIC4.id
+    assert from_ekman6.affect.representation == EKMAN6.id
+    assert set(from_basic4.affect.values) == set(BASIC4.axes)
+    assert set(from_ekman6.affect.values) == set(EKMAN6.axes)
+
+
+def test_a_sentence_with_no_emotion_word_decodes_at_rest():
+    """Absence is an answer, and it is reported rather than withheld.
+
+    The sentence is the design's own baseline scenario, which iteration 1 fails: getting a
+    job is a fact from which happiness must be *inferred*, and this decoder only decodes
+    affect that was stated. Pinned so that the failure stays visible and deliberate rather
+    than being quietly patched with a phrase entry one afternoon.
+    """
+    got, _ = _decode(_basic4(), "I just got the job!")
+
+    assert set(got.affect.values.values()) == {BASIC4.rest}
+    assert got.rationale == NO_MATCH
+
+
+def test_only_whole_words_match():
+    """"good" must not fire inside "goodbye", and substring matching is the obvious wrong turn.
+
+    A false positive here is invisible: it produces a plausible mild reading that looks
+    exactly like a real one, and it would shift every benchmark score by an unknown amount.
+    """
+    got, _ = _decode(_basic4(), "goodbye everyone")
+
+    assert got.rationale == NO_MATCH
+
+
+def test_matches_on_one_axis_combine_by_max_not_sum():
+    """Two happiness words give the stronger one, not their total.
+
+    Summing would leave the representation's range — 0.7 and 0.9 make 1.6 — and would make a
+    word repeated for emphasis read as a stronger feeling than it is.
+    """
+    got, _ = _decode(_basic4(), "I was happy, then delighted")
+
+    assert got.affect.values["happiness"] == 0.9
+
+
+def test_separate_axes_rise_independently():
+    """Magnitudes are independent intensities, not a distribution, so both axes hold."""
+    got, _ = _decode(_basic4(), "I'm delighted but astonished")
+
+    assert got.affect.values["happiness"] == 0.9
+    assert got.affect.values["fear_surprise"] == 0.9
+
+
+def test_the_estimate_carries_the_utterance_timestamp_not_the_decode_time():
+    """The estimate is a claim about what the human felt *when they spoke*.
+
+    Written with a timestamp months in the past, so a decoder that read a clock instead
+    fails by an unmistakable margin rather than by microseconds. It matters most for the
+    decoder this one is standing in for: an LLM taking most of a second would otherwise
+    shift the whole recorded timeline by its own latency.
+    """
+    long_ago = datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+    got, utterance = _decode(_basic4(), "I am happy", at=long_ago)
+
+    assert got.at == long_ago
+    assert got.at == utterance.at
+
+
+def test_the_record_names_its_producer_and_its_input_and_claims_no_confidence():
+    """Provenance, and the one field the decoder must leave empty.
+
+    ``confidence`` stays ``None`` because a keyword matched or it did not. A fabricated
+    ``1.0`` would make this decoder look more certain than an LLM honestly reporting 0.7,
+    confounding the comparison the decoder exists to be one half of.
+    """
+    got, utterance = _decode(_basic4(), "I am happy")
+
+    assert got.source == DECODER
+    assert got.target is Target.OTHER
+    assert got.of_input == utterance.id
+    assert got.confidence is None
+
+
+def test_the_rationale_records_every_word_that_fired():
+    """The benchmark's dependency: a row must explain itself without a re-run.
+
+    Both words appear even though only one survived the ``max``, because a word that fired
+    and was overruled is exactly what an error analysis is looking for. Without this, a
+    mild reading produced by a false positive is indistinguishable from a genuinely mild one.
+    """
+    got, _ = _decode(_basic4(), "I was happy, then delighted")
+
+    assert got.rationale == "matched: happiness=happy, happiness=delighted"

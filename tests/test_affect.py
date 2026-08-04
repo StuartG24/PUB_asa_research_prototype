@@ -2,14 +2,19 @@
 # Test - affect types
 #
 
-"""Tests for the affect representation.
+"""Tests for the affect record types.
 
 These types are nearly pure data, so a test per field would mostly be testing
 ``dataclasses`` rather than this module. What is covered instead is the small amount of
-behaviour the module adds — the timezone guard — plus the properties other components
-will silently depend on: that ``Emotion`` members work as ``str`` keys, that a record
-survives ``dataclasses.asdict()`` on its way to JSONL, and that each record gets its own
-identifier.
+behaviour the module adds — the timezone guard — plus the properties other components will
+silently depend on: that a record survives ``dataclasses.asdict()`` on its way to JSONL, and
+that each record gets its own identifier.
+
+The axis vocabularies live in ``asa.core.representations`` and are tested there. The
+identifiers below are written as plain string literals rather than read from that module,
+deliberately: ``AffectVector.representation`` is a free ``str`` precisely so a record can
+name a representation the code does not declare, and a fixture that could only be built from
+a live declaration would quietly assert the opposite.
 """
 
 import json
@@ -24,7 +29,6 @@ from asa.core.affect import (
     AffectObservation,
     AffectState,
     AffectVector,
-    Emotion,
     Target,
     Utterance,
 )
@@ -32,9 +36,11 @@ from asa.core.affect import (
 NAIVE = datetime(2026, 8, 1, 14, 30)                # no tzinfo — the value under test
 AWARE = datetime(2026, 8, 1, 14, 30, tzinfo=UTC)
 
-HAPPY = AffectVector(space="ekman4/1", values={"happiness": 0.9, "surprise": 0.3})
-NEUTRAL = AffectVector(space="ekman4/1", values={"happiness": 0.0, "sadness": 0.0,
-                                                 "anger": 0.0, "surprise": 0.0})
+HAPPY = AffectVector(representation="basic4/1",
+                     values={"happiness": 0.9, "fear_surprise": 0.3})
+NEUTRAL = AffectVector(representation="basic4/1",
+                       values={"happiness": 0.0, "sadness": 0.0,
+                               "fear_surprise": 0.0, "anger_disgust": 0.0})
 
 
 def test_utterance_rejects_a_naive_timestamp():
@@ -87,21 +93,6 @@ def test_each_utterance_gets_its_own_id():
     assert first.id != second.id
 
 
-def test_emotion_members_are_usable_as_str_keys():
-    """``values`` is keyed by ``str``, and ``StrEnum`` members hash as their value.
-
-    This is what lets a component write ``{Emotion.HAPPINESS: 0.9}`` for the enum's
-    safety while the container stays open to a ``vad/1`` vector whose axes are not
-    ``Emotion`` members at all. A plain ``Enum`` would hash by member *name* and raise
-    ``KeyError`` on the lookup below.
-    """
-    vector = AffectVector(space="ekman4/1", values={Emotion.HAPPINESS: 0.9})
-
-    assert vector.values["happiness"] == 0.9
-    assert Emotion.HAPPINESS == "happiness"
-    assert f"{Emotion.HAPPINESS}" == "happiness"        # what reaches the JSONL record
-
-
 def test_state_round_trips_to_plain_data():
     """``asdict()`` is how a record reaches JSONL, and it must arrive as plain containers.
 
@@ -111,8 +102,8 @@ def test_state_round_trips_to_plain_data():
     """
     record = asdict(AffectState(other=HAPPY, self_=NEUTRAL, at=AWARE))
 
-    assert record["other"] == {"space": "ekman4/1",
-                               "values": {"happiness": 0.9, "surprise": 0.3}}
+    assert record["other"] == {"representation": "basic4/1",
+                               "values": {"happiness": 0.9, "fear_surprise": 0.3}}
     assert record["schema"] == "state/1"
 
 

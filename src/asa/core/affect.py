@@ -4,28 +4,33 @@
 # The representation that flows through every component
 
 
-"""The affect representation — the load-bearing data structure of the agent.
+"""The affect record types — the load-bearing data structures of the agent.
 
 Everything the agent perceives, believes, plans and records is expressed in these types,
 and they are what the evaluation analyses.
 
-Affect is a **vector with its space named**. ``AffectVector`` carries an axis-name →
-magnitude mapping plus a ``space`` saying what those axes mean. 
-- ``ekman4/1`` axes are not — the midpoint between anger and surprise is not an emotion
-- ``vad/1`` is a metric space — distance and midpoints are meaningful
+Affect is a **vector with its representation named**. ``AffectVector`` carries an axis-name
+→ magnitude mapping plus a ``representation`` identifier saying what those axis names mean.
+What a given identifier means — which axes exist and in what order, over what range, what an
+axis rests at, and whether distance between two vectors is meaningful — is declared in
+``asa.core.representations``, not here. **This module holds the containers; that one holds
+the ways of modelling affect.**
 
-Any component that *interprets* a vector must therefore assert the space
-it supports, and must read axes by name rather than by position — an encoder built for one
-space would otherwise read valence as happiness and cheerfully smile.
+Any component that *interprets* a vector must assert the representation it supports and read
+axes by name rather than by position. An encoder built for one representation would
+otherwise read valence as happiness and cheerfully smile.
 
-Values are independent intensities in 0.0–1.0, not a distribution; they do not sum to 1.
-Surprised *and* happy is an ordinary human state, per-axis decay toward zero is honest
-where ageing a distribution is a fudge, and "neutral" falls out as the zero vector.
-There is consequently no separate ``intensity`` field: the magnitude *is* the intensity, 
-so the magnitude and the label cannot disagree in recorded data.
+Magnitudes are **independent intensities, not a distribution**: they do not sum to 1,
+because surprised *and* happy is an ordinary human state, and ageing independent values is
+honest where ageing a distribution is a fudge. There is consequently no separate
+``intensity`` field — the magnitude *is* the intensity, so the magnitude and the label
+cannot disagree in recorded data. Note what is **not** claimed here: the range those
+magnitudes take and the value an axis rests at are properties of the representation, not of
+this container, and treating either as universal is the mistake that made
+``representations`` a module of its own.
 
-``space`` and ``schema`` version different things: ``schema`` versions the record shape for
-data already on disk, ``space`` versions the meaning of the axes.
+``representation`` and ``schema`` version different things: ``schema`` versions the record
+shape for data already on disk, ``representation`` versions the meaning of the axes.
 """
 
 import uuid
@@ -76,26 +81,8 @@ def _require_aware(field_name: str, value: datetime | None) -> None:
         )
 
 #
-# ── Emotions and affect and target ──────────────────────────────────────────────────────
+# ── Affect and target ───────────────────────────────────────────────────────────────────
 #
-
-
-class Emotion(StrEnum):
-    """Axis NAMES for the ``ekman4/1`` space — not a value type.
-
-    An ``AffectVector`` in this space carries a magnitude for each of these, so affect is
-    never held as a bare category. There is no ``NEUTRAL`` member: neutral is every axis at
-    or below a configured threshold.
-
-    Explicit string values rather than ``auto()``: these strings are the keys written into
-    the JSONL trial records, and ``auto()`` numbers members by position — reordering or
-    inserting a member would silently change the meaning of data already on disk.
-    """
-
-    HAPPINESS = "happiness"
-    SADNESS = "sadness"
-    ANGER = "anger"
-    SURPRISE = "surprise"
 
 
 class Target(StrEnum):
@@ -114,19 +101,23 @@ class Target(StrEnum):
 class AffectVector:
     """An affect estimate, with the meaning of its axes named.
 
-    For example an Ekman4 or a VAD representation of affect
+    ``representation`` is a free ``str`` and not a reference to an ``AffectRepresentation``,
+    deliberately. Records outlive the code that wrote them, so a stream from an earlier pilot
+    may name a representation this build no longer declares — a string still loads and the
+    row stays readable, where a reference would fail to resolve and make the data unopenable
+    by the current code. ``asa.core.representations`` is the lookup from one to the other.
 
     The mapping's contents can still be changed in place — values altered, axes added or removed.
-    ``frozen=True`` protects the *binding*, not the contents. 
+    ``frozen=True`` protects the *binding*, not the contents.
     ``values`` is annotated ``Mapping`` to say "treat as read-only", but a ``dict`` passed
-    in stays mutable in place. 
+    in stays mutable in place.
     Deliberately not wrapped in ``MappingProxyType``: that does not survive
     ``dataclasses.asdict()`` (it raises ``cannot pickle 'mappingproxy'``), which would
     break the recorder for the sake of a guarantee no component needs.
     """
 
-    space: str                      # "ekman4/1" | "vad/1" — what the axes MEAN
-    values: Mapping[str, float]     # axis name → magnitude, 0.0–1.0
+    representation: str             # "basic4/1" | "ekman6/1" — what the axis names MEAN
+    values: Mapping[str, float]     # axis name → magnitude, within the representation's range
 
 #
 # ── Utterance and evidence ──────────────────────────────────────────────────────────────
@@ -167,7 +158,7 @@ class Utterance:
 class AffectEvidence:
     """One estimate of affect at an instant in time. From: perception or deliberation.
 
-    Distinct from ``AffectState``: evidence is an *estimate*, state is the model's *belief*. 
+    Distinct from ``AffectState``: evidence is an *estimate*, state is the model's *belief*.
     Keeping the types apart means an estimate cannot be assigned over a belief, so the fold rule
     is enforced by the type system rather than remembered.
 
@@ -181,8 +172,11 @@ class AffectEvidence:
         ``1.0``, which would make a rule decoder look maximally sure beside an LLM
         honestly reporting 0.7.
     ``rationale``
-        The audit trail for autonomous behaviour. When the agent looks concerned because
-        the human went quiet, this is the only record of why.
+        The audit trail for why this evidence says what it does. When the agent looks
+        concerned because the human went quiet, this is the only record of why — and a
+        decoder fills it with what it matched on, so that an analysis can tell a genuinely
+        mild reading from a false positive without re-running the decoder. Every producer
+        may fill it; ``source`` is what distinguishes them.
     ``computed_from``
         The state snapshot this was derived from, so a late-arriving appraisal can be
         discounted by how stale it is rather than trusted equally.
@@ -190,7 +184,7 @@ class AffectEvidence:
         Provenance back to the raw input, so the recorder can reconstruct what was actually
         said. Without it the trial record has an inferred vector and no text. Named for the
         input generally, not for ``Utterance``, eg deferred physiological and
-        vision inputs produce no utterance 
+        vision inputs produce no utterance
     ``target``
         Which of the two entirely different claims this is.
     """
@@ -199,7 +193,7 @@ class AffectEvidence:
     affect: AffectVector
     confidence: float | None = None
     source: str = ""                        # "decoder:rule" | "deliberation:llm" | …
-    rationale: str | None = None            # free-text why; only deliberation fills it in I1
+    rationale: str | None = None            # free-text why; any producer may fill it
     computed_from: datetime | None = None   # the snapshot it was derived from
     of_input: str | None = None             # the input record's id — Utterance.id today
     at: datetime = field(default_factory=utc_now)
@@ -213,8 +207,8 @@ class AffectEvidence:
 AffectObservation = AffectEvidence
 """Perception's output: an alias, not a new type.
 
-Perception produces evidence like anything else — ``target=OTHER``, no ``rationale``, a
-``source`` naming the decoder. The alias exists so call sites read as what they are.
+Perception produces evidence like anything else — ``target=OTHER`` and a ``source`` naming
+the decoder. The alias exists so call sites read as what they are.
 """
 
 

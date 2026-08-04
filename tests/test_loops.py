@@ -25,20 +25,19 @@ from asa.core.affect import (
     AffectEvidence,
     AffectState,
     AffectVector,
-    Emotion,
     Target,
 )
 from asa.core.loops import EvidenceLoop
 from asa.core.observers import Event, Observers
 
-NEUTRAL = AffectVector("ekman4/1", {})
+NEUTRAL = AffectVector("basic4/1", {})
 
 
 def _evidence(source: str = "test:producer") -> AffectEvidence:
     """One piece of evidence. ``source`` labels it so ordering can be asserted."""
     return AffectEvidence(
         target=Target.OTHER,
-        affect=AffectVector("ekman4/1", {Emotion.HAPPINESS: 0.8}),
+        affect=AffectVector("basic4/1", {"happiness": 0.8}),
         source=source,
     )
 

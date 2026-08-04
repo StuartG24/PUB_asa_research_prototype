@@ -66,9 +66,10 @@ class FacialPrototype(StrEnum):
     ``BigSmile`` primitives, absorbing that redundancy is the adapter's job — a neutral
     vocabulary carrying it would be the two-stage mapping failing at its one purpose.
 
-    There is likewise no ``NEUTRAL`` member, matching ``Emotion``: neutral is the zero vector,
-    and a ``{"neutral": 1.0}`` entry sitting beside ``{"smile": 0.5}`` would be incoherent. An
-    adapter given an empty or all-zero vector returns the face to rest.
+    There is likewise no ``NEUTRAL`` member, matching the affect representations in
+    ``asa.core.representations``: neutral is the vector at rest, and a ``{"neutral": 1.0}``
+    entry sitting beside ``{"smile": 0.5}`` would be incoherent. An adapter given an empty or
+    all-zero vector returns the face to rest.
 
     Explicit string values rather than ``auto()``: these strings are the keys written into the
     JSONL trial records, and ``auto()`` numbers members by position — reordering or inserting a
