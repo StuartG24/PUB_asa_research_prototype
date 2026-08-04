@@ -143,11 +143,18 @@ class Utterance:
     No ``context`` slot is reserved for the framework's Context/Background moderators. An
     always-``None`` field with no type is documentation that lies, and it is trivial to add
     the day a ``Context`` type exists.
+
+    ``intended`` is the affect a sentence was *meant* to convey, and only a source that
+    knows it may set it. Two do: the generated source, which chose the affect before
+    writing the sentence, and a labelled benchmark set, whose rows were written to convey a
+    stated affect. A person typing at a console does not declare their intent and leaves it
+    ``None`` — which is why those two sources are the only ones a decoder's accuracy can be
+    measured against, offline from a notebook or replayed through the live agent.
     """
 
     text: str
     source: str                             # "input:text_console" | "input:random" | …
-    intended: AffectVector | None = None    # ground truth — the random generator only
+    intended: AffectVector | None = None    # ground truth — generated and benchmark sources
     id: str = field(default_factory=new_id)
     at: datetime = field(default_factory=utc_now)
     schema: str = "utterance/1"
