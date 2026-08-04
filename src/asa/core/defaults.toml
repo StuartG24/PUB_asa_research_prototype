@@ -5,7 +5,7 @@
 # working directory. Override selected keys with `asa --config <file>`.
 
 [project]
-# The design document this build implements — "ASA Design v0.4" in the Obsidian
+# The design document this build implements — "ASA Design vn.n" in the Obsidian
 # vault. Copied into every run manifest so recorded results point back at the
 # reasoning behind them, not just at the code. A claim, not a check: bump it when
 # the design version bumps.
