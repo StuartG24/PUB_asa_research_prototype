@@ -50,8 +50,5 @@ htmlcov/
 # Data & results (large / generated)
 data_in/*
 !data_in/.gitkeep
-# ...except labelled benchmark sets, which are research instruments rather than inputs:
-# a result is only reproducible if the set it was scored against is versioned with the code
-!data_in/*_benchmark.csv
 data_results/*
 !data_results/.gitkeep
