@@ -12,9 +12,15 @@ Wired up two ways:
 So:
 - uv run asa
 - uv run asa --log info
+- uv run asa --furhat-demo
 And:
 - uv run python -m asa
 
+**Two paths, and only one of them is the agent.** ``--furhat-demo`` runs the v0.2.0
+smile-and-speak check against a real or virtual Furhat. It is the only thing that exercises
+the connection outside ``test_furhat_integration.py``, which skips when no robot answers.
+It has a deletion date: step 11 refactors ``session.py`` into ``embodiment/furhat.py``
+behind the ``Embodiment`` port, and this becomes a test of that adapter instead.
 """
 
 import argparse
@@ -23,46 +29,65 @@ import logging
 from pathlib import Path
 
 from asa._tools.custom_logging import setup_logging
+from asa.affect_model import AffectModel
 from asa.core.config import load_config
+from asa.core.observers import Observers
+from asa.core.representations import EKMAN6
+from asa.perception.decode_keyword import EKMAN6_KEYWORDS, KeywordDecoder
+from asa.perception.text_console import TextConsole
+from asa.runtime import run_agent
 from asa.session import ASASession, FurhatUnreachable
 
 log = logging.getLogger(f"{__name__}.app")
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Build the Articial Social Agent
-    - Virtual Furhat
-    - An interaction session
+    """Resolve configuration, choose what this run is made of, then run it.
 
     ``argv`` defaults to None, which makes argparse read the real ``sys.argv`` — the
     behaviour both entry points need. Passing an explicit list lets a test (or any other
     caller) drive main() without argparse picking up the *host* process's arguments.
-    """
-    # Get CLI parameters
-    args = build_parser().parse_args(argv)
 
-    # Setup custom logging
+    **This is the composition root, and it is the only place that names a concrete
+    adapter.** Everything below it is handed its collaborators and never chooses one, which
+    is what makes the swap-the-robot and swap-the-decoder claims real rather than stated.
+    """
+    args = build_parser().parse_args(argv)
     setup_logging(level=args.log.upper())
 
-    # Resolve configuration, then let any explicit argument win over it. Three layers
-    # in all — packaged defaults, override file, command line — and this is the only
+    # Three layers — packaged defaults, override file, command line — and this is the only
     # place the last one is applied, so load_config() stays usable from a notebook.
     config = load_config(args.config)
     host = args.host or config.furhat_host
 
     log.info("ASA Launch - Design %s, Furhat Host %s", config.design_version, host)
 
-    # Run the session. This is the only place that owns an event loop — run_session and
-    # ASASession are both loop-agnostic, so a notebook (which already has one) can await
-    # the same pieces directly.
-    try:
-        asyncio.run(run_session(host=host,
-                                client_log_level=getattr(logging, args.log.upper())))
-    except FurhatUnreachable as error:
-        # An unreachable Furhat is an operator problem, not a defect — one line and a
-        # non-zero exit is more use than a traceback through asyncio and websockets.
-        log.error("%s", error)
-        raise SystemExit(1) from None
+    # The legacy path, self-contained so step 11 can delete this block whole.
+    if args.furhat_demo:
+        try:
+            asyncio.run(furhat_demo(host=host,
+                                    client_log_level=getattr(logging, args.log.upper())))
+        except FurhatUnreachable as error:
+            # An unreachable Furhat is an operator problem, not a defect — one line and a
+            # non-zero exit is more use than a traceback through asyncio and websockets.
+            log.error("%s", error)
+            raise SystemExit(1) from None
+        return
+
+    # The agent. EKMAN6 is fixed here until `[affect] representation` lands in configuration
+    # (design §11): a config key naming a representation also needs somewhere to pair it
+    # with its lexicon, and that has no home yet.
+    observers = Observers()
+    source = TextConsole()
+    decoder = KeywordDecoder(representation=EKMAN6, table=EKMAN6_KEYWORDS)
+    model = AffectModel()
+
+    # The only place that owns an event loop, so run_agent stays loop-agnostic and a
+    # notebook — which already has one — can await it directly.
+    asyncio.run(run_agent(source=source,
+                          decoder=decoder,
+                          state_writer=model.observe,
+                          observers=observers))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,33 +102,27 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Furhat address (default: from configuration)")
     parser.add_argument("--config", type=Path, default=None, metavar="FILE",
                         help="TOML file overriding selected configuration keys")
+    parser.add_argument("--furhat-demo", action="store_true",
+                        help="run the smile-and-speak connection check instead of the agent")
     return parser
 
 
-async def run_session(host: str, client_log_level: int) -> None:
-    """Start a session, run the interaction, then stop it — the three phases, spelled out."""
-    session = ASASession(host=host, client_log_level=client_log_level)
+async def furhat_demo(host: str, client_log_level: int) -> None:
+    """Prove the Furhat connection works: connect, smile, speak, disconnect.
 
-    # start() sits outside the try deliberately: if the connection never opened there is
-    # nothing to clean up, and start() has already dropped the dead client itself.
+    ``stop()`` is in a ``finally`` rather than a trailing call — a failure part-way through
+    must still close the websocket, or the Furhat is left half-connected. ``start()`` sits
+    outside the ``try`` deliberately: if the connection never opened there is nothing to
+    clean up, and ``start()`` has already dropped the dead client itself.
+
+    ``gesture()`` does not wait, so the smile plays *while* the line is spoken rather than
+    before it — one turn rather than two.
+    """
+    session = ASASession(host=host, client_log_level=client_log_level)
     await session.start()
 
     try:
-        await interaction(session)
+        await session.gesture("Smile", intensity=0.6, duration=2.0)
+        await session.say("Hello, this is a second test")
     finally:
-        # finally, not merely a trailing call — an exception part-way through the
-        # interaction must still close the websocket, or the Furhat is left half-connected.
         await session.stop()
-
-
-async def interaction(session: ASASession) -> None:
-    """What the agent actually does — a placeholder until the real agent logic lands.
-
-    This is the equivalent of a notebook's middle cells: everything between start and stop.
-    It takes an already-started session rather than creating one, so it never has to care
-    how the connection was made, and the same body can be pasted into a notebook cell.
-    """
-    # gesture() does not wait, so the smile plays *while* the line is spoken rather than
-    # before it — one turn rather than two.
-    await session.gesture("Smile", intensity=0.6, duration=2.0)
-    await session.say("Hello, this is a second test")
