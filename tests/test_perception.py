@@ -2,7 +2,8 @@
 # Test - perception
 #
 
-"""Tests for the producer side: the two ports, the text console adapter and the decoder.
+"""Tests for the producer side: the two ports, the text console adapter, the decoder and
+the driver that runs them.
 
 The adapter is a loop around a call, so what is worth testing is not that it reads. It is
 the four things other components rely on: that it satisfies the port at all, that it tags
@@ -19,6 +20,10 @@ any assertion that the two representations agree on the axes they share, since t
 are independent by design and such a test would pin data rather than behaviour; and any test
 that ``decode`` needs to be ``async``, since this implementation never awaits and the port's
 asynchrony exists for the LLM decoder — the annotation in the port test is what holds it.
+
+The driver is tested for the four things the rest of the agent reads from it: that one
+utterance produces exactly one published record, that publishing precedes submission, that a
+decoder failure is contained, and that returning means the work is finished.
 """
 
 import asyncio
@@ -27,7 +32,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from asa.core.affect import AffectObservation, Target, Utterance, utc_now
+from asa.core.affect import AffectEvidence, AffectObservation, Target, Utterance, utc_now
+from asa.core.observers import Event, Observers
 from asa.core.representations import BASIC4, EKMAN6
 from asa.perception.base import AffectDecoder, InputSource
 from asa.perception.decode_keyword import (
@@ -37,6 +43,7 @@ from asa.perception.decode_keyword import (
     NO_MATCH,
     KeywordDecoder,
 )
+from asa.perception.drive import run_perception
 from asa.perception.text_console import SOURCE, TextConsole
 
 
@@ -332,3 +339,92 @@ def test_the_rationale_records_every_word_that_fired():
     got, _ = _decode(_basic4(), "I was happy, then delighted")
 
     assert got.rationale == "matched: happiness=happy, happiness=delighted"
+
+
+#
+# ── The producer task ───────────────────────────────────────────────────────────────────
+#
+
+
+class _BrokenDecoder:
+    """A decoder that always raises, standing in for an LLM call that timed out."""
+
+    async def decode(self, utterance: Utterance) -> AffectObservation:
+        raise RuntimeError("the model provider timed out")
+
+
+def _drive(source: InputSource, decoder: AffectDecoder) -> tuple[list[Event], list[AffectEvidence]]:
+    """Run the driver over a source, returning what it published and what it submitted."""
+    published: list[Event] = []
+    submitted: list[AffectEvidence] = []
+
+    observers = Observers()
+    observers.register(published.append)
+
+    asyncio.run(run_perception(source, decoder, submitted.append, observers))
+    return published, submitted
+
+
+def test_the_driver_publishes_the_utterance_and_submits_only_the_evidence():
+    """Each utterance is recorded once, and the evidence links back to it.
+
+    The count is the interesting half. Evidence is published by the evidence loop on behalf
+    of every producer, so a driver that published it here as well would double every row in
+    ``evidence.jsonl`` with nothing failing anywhere — an error that surfaces much later as
+    an analysis that quietly counts each observation twice.
+    """
+    console = TextConsole(read=_scripted("I am happy", "I am sad"))
+    published, submitted = _drive(console, _basic4())
+
+    utterances = [event for event in published if isinstance(event, Utterance)]
+    assert len(utterances) == len(published) == 2
+    assert [evidence.of_input for evidence in submitted] == [utterance.id for utterance in utterances]
+    assert [evidence.at for evidence in submitted] == [utterance.at for utterance in utterances]
+
+
+def test_the_utterance_is_published_before_its_evidence_is_submitted():
+    """Ordering is the claim, so it is asserted on one interleaved trace, not on two lists.
+
+    Two separate lists would pass whatever the order was. What this pins is the failure
+    signature the design reads at analysis time: an utterance row with no evidence row after
+    it means the decode failed. Publish after decoding instead and a failed decode leaves no
+    trace of the utterance at all, so the participant's turn vanishes from the record.
+    """
+    trace: list[str] = []
+
+    observers = Observers()
+    observers.register(lambda event: trace.append("published"))
+
+    console = TextConsole(read=_scripted("I am happy", "I am sad"))
+    asyncio.run(run_perception(console, _basic4(),
+                               lambda evidence: trace.append("submitted"), observers))
+
+    assert trace == ["published", "submitted", "published", "submitted"]
+
+
+def test_a_failing_decoder_costs_one_utterance_and_not_the_session():
+    """Containment, and it is the opposite of the evidence loop's policy on purpose.
+
+    The decoder becomes an LLM call, so a failure is a transient and the useful response is
+    to lose that observation and carry on. A raise from the affect model is a bug and is
+    fatal. Both utterances still appear in the record, which is what makes the gap readable.
+    """
+    console = TextConsole(read=_scripted("I am happy", "I am sad"))
+    published, submitted = _drive(console, _BrokenDecoder())
+
+    assert len(published) == 2
+    assert submitted == []
+
+
+def test_the_driver_returns_only_once_the_last_utterance_has_been_submitted():
+    """Returning is the "producers have stopped" signal, and the runtime acts on it.
+
+    On that signal the runtime drains the queue and cancels the consumer. If this returned
+    with work still outstanding, the drain would run before the last observation had been
+    submitted and the final turn of a session would be lost — with the recording looking
+    complete, because a drained queue is exactly what a clean shutdown produces.
+    """
+    console = TextConsole(read=_scripted("I am happy", "I am sad", "I am angry"))
+    _, submitted = _drive(console, _basic4())
+
+    assert len(submitted) == 3
