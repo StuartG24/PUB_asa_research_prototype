@@ -9,7 +9,7 @@
 # vault. Copied into every run manifest so recorded results point back at the
 # reasoning behind them, not just at the code. A claim, not a check: bump it when
 # the design version bumps.
-design_version = "v0.4"
+design_version = "v0.4.1"
 
 [furhat]
 # 127.0.0.1 is the virtual Furhat in the local SDK. A physical robot is its address

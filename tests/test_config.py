@@ -33,7 +33,7 @@ def test_the_design_version_is_pinned_deliberately():
 
     **What it deliberately cannot catch, and this is worth knowing before relying on it:** a
     bump that never happened. Change the design document to v0.5 and touch neither this line
-    nor ``defaults.toml``, and the suite stays green while every manifest claims v0.4. The
+    nor ``defaults.toml``, and the suite stays green while every manifest claims v0.4.1. The
     mitigation is procedural — bump the document and the package in one sitting — not
     technical.
 
@@ -41,7 +41,7 @@ def test_the_design_version_is_pinned_deliberately():
     string in the repository and tested only that they agreed with each other. The other two
     now assert the properties their names claim, which is what they were always for.
     """
-    assert load_config().design_version == "v0.4"
+    assert load_config().design_version == "v0.4.1"
 
 
 def test_override_replaces_only_the_keys_given(tmp_path):
