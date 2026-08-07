@@ -29,7 +29,7 @@ import logging
 from pathlib import Path
 
 from asa._tools.custom_logging import setup_logging
-from asa.affect_model import AffectModel
+from asa.affect_model.belief import AffectModel
 from asa.core.config import load_config
 from asa.core.observers import Observers
 from asa.core.representations import EKMAN6
