@@ -64,6 +64,7 @@ class AffectModel:
     """The sole author of ``AffectState``: folds evidence into belief, and ages it."""
 
     def observe(self, evidence: AffectEvidence) -> AffectState:
-        log.warning("Affect model not built (step 6) — returning a stub state, "
-                    "not a belief: %r", evidence)
+        # log.warning("Affect model not built (step 6) — returning a stub state, "
+        #             "not a belief: %r", evidence)
+        log.warning("Affect model not built (step 6) — returning a stub state")
         return AffectState(other=_NOT_A_BELIEF, self_=_NOT_A_BELIEF, at=evidence.at)

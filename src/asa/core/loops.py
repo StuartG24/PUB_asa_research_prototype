@@ -18,14 +18,11 @@ Producers currently are:
 - Intention planner
 
 **The evidence queue and the evidence loop are two different things**.
-- The queue is an ``asyncio.Queue``: a buffer that producers write to, which takes no decision and knows nothing. 
-- The loop is the consumer task that drains it, hands each item to the affect model, 
-publishes what happened, and stops cleanly.
+- Queue is an ``asyncio.Queue``: a buffer that producers write to, which takes no decision and knows nothing. 
+- Loop is the consumer task that drains it, hands each item to the affect model, publishes, and stops cleanly.
 
 ``EvidenceLoop`` **owns** its queue rather than being handed one, so producers hold a
-``submit`` method and never see the transport. Swapping the queue for a message bus is then
-a change in one place instead of one per producer, which is what the design assumes when it
-sets out the conditions under which a bus would earn itself.
+``submit`` method and never see the transport. 
 
 **Only the loop publishes evidence, whichever producer made it.** 
 Producers all submit and none of them holds the observer registry 
