@@ -44,7 +44,7 @@ def _evidence(source: str = "test:producer") -> AffectEvidence:
 
 def _state(at: datetime) -> AffectState:
     """What a stand-in affect model hands back. Its contents are not the subject here."""
-    return AffectState(other=NEUTRAL, self_=NEUTRAL, at=at)
+    return AffectState(other=NEUTRAL, self_=NEUTRAL, expressed=NEUTRAL, at=at)
 
 
 async def _stop(task: "asyncio.Task[None]") -> None:
@@ -85,7 +85,7 @@ def test_evidence_is_folded_and_both_records_are_published_in_order():
         await _stop(task)
 
         assert len(folded) == 1
-        assert [event.schema for event in seen] == ["evidence/1", "state/1"]
+        assert [event.schema for event in seen] == ["evidence/1", "state/2"]
 
     asyncio.run(scenario())
 

@@ -86,15 +86,35 @@ def _require_aware(field_name: str, value: datetime | None) -> None:
 
 
 class Target(StrEnum):
-    """Whose affect a piece of evidence is about.
+    """What a piece of evidence is about.
 
-    - Self: Is the agent, robot
-    - Other: Is the human interactant
+    - Self: the agent's own affect — what it FEELS. Written by the intention planner
+    - Other: the human interactant — what the agent BELIEVES they feel
+    - Expressed: the affect the agent actually CONVEYED. Written by the response loop
 
+    **``EXPRESSED`` is deliberately not named for a channel.** Iteration 1 expresses through the
+    face alone, but the same claim covers tone of voice, gesture and posture as those arrive:
+    what is recorded is *affect*, in the representation's axes, not a description of the
+    machinery that produced it. Naming this member ``FACIAL`` would have needed renaming the
+    day a second channel is driven independently, and renaming a ``Target`` costs a ``schema``
+    bump and two record shapes in one analysis. Which channel did what is recorded separately,
+    on the render (``ExpressionPlan`` already carries a face channel and a voice channel).
+
+    **``EXPRESSED`` is not a belief, and holding it apart from ``SELF`` is the whole point of
+    having it.** ``self_`` is what the agent feels; folding an executed expression into it
+    would merge *intended* with *shown*, and the difference between those two is the quantity
+    an empathic agent's evaluation most wants to report. Kept separate, one record answers
+    three questions: what the human feels, what the agent feels, and what the agent showed.
+
+    This is also why it is **not** facial feedback. Nothing lets ``EXPRESSED`` evidence reach
+    ``self_``, so the agent knowing that it smiled does not make it feel happier. That remains
+    a deliberate modelling position; if a later iteration wants it, it becomes a fold policy
+    and an explicit theoretical commitment rather than a consequence of where a value was put.
     """
 
     SELF = "self"
     OTHER = "other"
+    EXPRESSED = "expressed"
 
 
 @dataclass(frozen=True)
@@ -219,9 +239,9 @@ the decoder. The alias exists so call sites read as what they are.
 
 @dataclass(frozen=True)
 class AffectState:
-    """The model's belief about both parties (self and other) at one instant.
+    """What the model holds at one instant: two beliefs, and a record of what was shown.
 
-    Self and other are held separately because they age by two different processes:
+    The two beliefs are held separately because they age by two different processes:
     — the estimate of other's state goes stale as *evidence*, an epistemic decay
     — whereas the agent's own affect ages as an emotional one.
     Plausibly different time constants and different shapes, so must not be conflated
@@ -231,12 +251,33 @@ class AffectState:
     folded and aged like any other belief. Perception and deliberation only ever target
     ``OTHER``. The rule across the whole architecture: **everything infers about other; only
     the planner decides self.**
+
+    ``expressed`` is the third vector and the odd one out: **it is a fact, not an estimate.**
+    The response loop reports the ``self_`` value it actually rendered from, so this says what
+    the agent was *commanded* to convey. Three consequences, and they are why the fold and the
+    ageing are **per target** rather than uniform. It is assigned rather than weighted, because
+    a record of what was commanded must not drift toward anything. It does not decay, because
+    it has nothing to go stale about — it holds until the next render replaces it. And it never
+    reaches ``self_``: see ``Target``.
+
+    **Why a third vector rather than a change to ``self_``.** Merged, *intended* and *conveyed*
+    become one number and "did the agent express what it meant?" stops being answerable — which
+    is the question a study of empathic expression is largely asking. The cost of keeping them
+    apart is one field; the cost of merging them is not recoverable afterwards.
+
+    **One vector across all channels, and its limit is known.** Iteration 1 drives one channel,
+    so one vector says everything. When face and voice are driven independently — an
+    experimental factor in the design — a single vector cannot record that the face conveyed one
+    thing and the voice another, and a channel *disabled by condition* is **not applicable**
+    rather than at rest. That is a ``state/3`` decision and a research one, deliberately left
+    open rather than guessed at.
     """
 
-    other: AffectVector
-    self_: AffectVector
+    other: AffectVector                     # the belief about the human — what it FEELS
+    self_: AffectVector                     # the agent's own affect — what it FEELS
+    expressed: AffectVector                 # the affect it actually CONVEYED, any channel
     at: datetime                            # the instant this state is valid for
-    schema: str = "state/1"
+    schema: str = "state/2"                 # was state/1, before ``expressed``
 
     def __post_init__(self) -> None:
         _require_aware("at", self.at)
@@ -265,6 +306,11 @@ class AffectHistory:
     ``AffectVector``. So the outer guarantee only holds if the affect model treats §9.3's
     *fold, never overwrite* as producing new ``AffectVector`` objects rather than updating
     one in place.
+
+    Because a snapshot is a whole ``AffectState``, both reasoning ports also see ``expressed``
+    without this type changing or gaining a second parameter — so a deliberator can ask whether
+    the agent has been conveying what it intended, which is a different question from what it
+    feels.
 
     ``current`` is not ``states[-1]``. It is the belief at ``at``, whereas ``states`` is the
     bounded window behind it, so a reader wanting only the value now never has to handle an

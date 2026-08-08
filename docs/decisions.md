@@ -293,8 +293,25 @@ is written into research data, and a pilot's files outlive the code that produce
   Pinned by a test, because the consequence lands on the recorder: it needs a `default=` handler for
   datetimes and for nothing else, since enum members serialise unaided.
 
-*Note: ASA Design v0.5 adds a third vector, `AffectState.expressed`, and a third `Target` member,
-taking the tag to `state/2`. Not yet in the code — it lands with the affect model.*
+- **A third vector records what the agent *conveyed*, held apart from what it feels.**
+  `AffectState.expressed` and `Target.EXPRESSED` took the tag to `state/2`. Merged into `self_`,
+  *intended* and *conveyed* would become one number and "did the agent express what it meant?"
+  would stop being answerable — which is much of what a study of empathic expression is asking.
+  It is a fact rather than an estimate, so it is assigned rather than weighted and never decays;
+  and nothing lets it reach `self_`, so this is not facial feedback.
+
+- **`EXPRESSED` is deliberately not named for a channel.** Iteration 1 expresses through the face
+  alone, but what is recorded is *affect*, in the representation's axes, not the machinery that
+  produced it — so the same member covers tone of voice, gesture and posture as they arrive.
+  Naming it `FACIAL` would have needed renaming the day a second channel is driven
+  independently, and renaming a `Target` costs a `schema` bump and two record shapes in one
+  analysis. Which channel did what is recorded on the render instead, where `ExpressionPlan`
+  already distinguishes a face channel from a voice channel.
+
+  **The known limit:** one vector cannot say that the face conveyed one thing and the voice
+  another, and a channel disabled by an experimental condition is *not applicable* rather than
+  at rest. Both arrive when two channels are driven independently, and both are left open rather
+  than guessed at.
 
 ### Considered and rejected
 

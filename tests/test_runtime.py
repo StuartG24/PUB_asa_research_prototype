@@ -73,7 +73,8 @@ def _recording_writer(folded: list[AffectEvidence]) -> StateWriter:
     """A stand-in affect model: records what it was given, returns a state for it."""
     def write(evidence: AffectEvidence) -> AffectState:
         folded.append(evidence)
-        return AffectState(other=evidence.affect, self_=_rest(), at=evidence.at)
+        return AffectState(other=evidence.affect, self_=_rest(), expressed=_rest(),
+                           at=evidence.at)
 
     return write
 
@@ -133,8 +134,8 @@ def test_each_input_produces_an_utterance_an_evidence_and_a_state_in_that_order(
     _run(_ScriptedSource("one", "two"), _recording_writer([]), observers)
 
     assert [event.schema for event in published] == [
-        "utterance/1", "evidence/1", "state/1",
-        "utterance/1", "evidence/1", "state/1",
+        "utterance/1", "evidence/1", "state/2",
+        "utterance/1", "evidence/1", "state/2",
     ]
 
 

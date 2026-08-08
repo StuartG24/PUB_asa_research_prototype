@@ -58,7 +58,7 @@ def test_evidence_rejects_a_naive_timestamp():
 def test_state_rejects_a_naive_timestamp():
     """``AffectState.at`` has no default, so it is the field most exposed to this."""
     with pytest.raises(ValueError, match="at must be timezone-aware"):
-        AffectState(other=HAPPY, self_=NEUTRAL, at=NAIVE)
+        AffectState(other=HAPPY, self_=NEUTRAL, expressed=NEUTRAL, at=NAIVE)
 
 
 def test_computed_from_rejects_a_naive_timestamp():
@@ -100,11 +100,42 @@ def test_state_round_trips_to_plain_data():
     ``AffectVector.values`` to make it read-only at runtime raises ``cannot pickle
     'mappingproxy'`` here, so this test fails the moment someone tries it.
     """
-    record = asdict(AffectState(other=HAPPY, self_=NEUTRAL, at=AWARE))
+    record = asdict(AffectState(other=HAPPY, self_=NEUTRAL, expressed=NEUTRAL, at=AWARE))
 
     assert record["other"] == {"representation": "basic4/1",
                                "values": {"happiness": 0.9, "fear_surprise": 0.3}}
-    assert record["schema"] == "state/1"
+    assert record["schema"] == "state/2"
+
+
+def test_target_vocabulary_is_pinned_whole():
+    """Every target the architecture knows about, asserted as a set.
+
+    Pinned whole for the same reason as ``FacialPrototype`` and the axis vocabularies: adding
+    or removing a target silently changes what the affect model has to handle, and it changes
+    what ``source``/``target`` agreement means — ``render:`` is the only prefix that may carry
+    ``EXPRESSED``, and ``EXPRESSED`` never appears without it. Both failures are invisible at
+    the point somebody would make them, and both land in research data rather than in a
+    traceback.
+    """
+    assert {target.value for target in Target} == {"self", "other", "expressed"}
+
+
+def test_state_schema_and_shape_are_pinned_together():
+    """``state/2`` and the field set are one claim, so they are asserted in one test.
+
+    The schema tag exists so that an analysis reading two pilots' files can tell one record
+    shape from another. That guarantee fails silently in exactly one way: the shape changes and
+    the tag does not, leaving two different shapes both claiming ``state/2`` and nothing able
+    to separate them. Asserting the tag *beside* the field set is what makes that unreachable —
+    a fourth vector cannot arrive without this test demanding a tag bump.
+
+    Deliberately not tested here: that omitting ``expressed`` raises ``TypeError``. That is
+    ``dataclasses`` behaving normally, not a decision this module made.
+    """
+    record = asdict(AffectState(other=HAPPY, self_=NEUTRAL, expressed=NEUTRAL, at=AWARE))
+
+    assert record["schema"] == "state/2"
+    assert set(record) == {"other", "self_", "expressed", "at", "schema"}
 
 
 def test_asdict_does_not_serialise_datetimes():
@@ -146,7 +177,7 @@ def test_observation_is_an_alias_not_a_subclass():
 
 def a_state(at: datetime = AWARE) -> AffectState:
     """A throwaway state, for tests whose subject is the history around it."""
-    return AffectState(other=HAPPY, self_=NEUTRAL, at=at)
+    return AffectState(other=HAPPY, self_=NEUTRAL, expressed=NEUTRAL, at=at)
 
 
 def test_history_rejects_a_naive_timestamp():
@@ -212,7 +243,7 @@ def test_history_asdict_recurses_and_json_returns_lists():
                                   evidence=(), at=AWARE))
 
     assert isinstance(record["states"], tuple)
-    assert record["states"][0]["schema"] == "state/1"
+    assert record["states"][0]["schema"] == "state/2"
 
     round_tripped = json.loads(json.dumps(record, default=str))
     assert isinstance(round_tripped["states"], list)
