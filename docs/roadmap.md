@@ -60,16 +60,20 @@ whose version is stamped into every run through `design_version` in
 - [x] **Benchmark data preparation** — labelled corpora reshaped into one standard frame carrying
       provenance, with unannotated axes left unmeasured rather than filled
       ([`notebooks/`](../notebooks))
+- [x] **The affect model** — the research core. Folds evidence into belief per target, ages it
+      lazily so that time is a parameter rather than a clock read, and answers `state_at(t)`
+      ([`affect_model/`](../src/asa/affect_model)) · decision 11
+- [x] **The reconstruction guarantee, defended rather than promised** — a run is recomputable from
+      the evidence it published plus the parameters a manifest carries, and two tests vary one
+      parameter each to prove the check can fail
+      ([`test_reconstruction.py`](../tests/test_reconstruction.py)) · decision 11
 
 `uv run asa` therefore hears a line, publishes it, decodes it to an affect estimate, queues that, and
-**stops at the affect model**, which raises rather than inventing a belief. An empty session exits 0.
+**folds it into a belief that ages on its own**. What the agent does not do is act: nothing reads the
+belief back, so it forms an inner state that reaches nobody. An empty session exits 0.
 
 **Planned — next**
 
-- [ ] **The affect model** — the research core, and the first component the design cannot fully
-      specify in advance. Folds evidence into belief per target, ages it lazily so that time is a
-      parameter rather than a clock read, and answers `state_at(t)`. Lands as `belief.py`,
-      `folding.py` and `decay.py`, replacing the stub that currently raises
 - [ ] **The intention planner** — the first proactive component, deciding on its own clock how the
       agent should feel and publishing that as evidence about itself
 - [ ] **Encoding and embodiment** — affect to a platform-neutral expression plan, then to a robot;

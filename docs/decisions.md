@@ -767,3 +767,128 @@ Where a thing lives is decided by one question: what may it import, and who may 
 - **`Callable` seams in `core/loops.py` instead of named ports.** `core/` may not import `perception/`,
   so both named ports would flatten into `Callable` aliases at exactly the place a reader wants their
   names — and unlike `StateWriter`, nothing forces it.
+
+---
+
+## 11. The affect model — a passive belief store, folded and aged
+
+*Implements ASA Design v0.6 §9, and records design decisions 20, 33 and 34.*
+
+The component every other one exists to serve, and the one expected to be rewritten repeatedly. Its
+contract is three sentences: **consume evidence, own the state, answer questions about it.** Nothing
+outside it reads or writes belief except through that.
+
+| Module | Holds |
+| --- | --- |
+| [`belief.py`](../src/asa/affect_model/belief.py) | the model — the per-target policy table, `observe()`, `state_at(t)` |
+| [`folding.py`](../src/asa/affect_model/folding.py) | how evidence moves a belief: the two knobs, the policy seam, two policies |
+| [`decay.py`](../src/asa/affect_model/decay.py) | how a belief ages when nothing arrives |
+
+- **The model owns no clock, emits nothing, and holds no thresholds.** Every instant it works with
+  arrives as a parameter — the evidence's own `at`, or the `t` a caller asks about. Decay is evaluated
+  **lazily at read time**, so nothing runs on a schedule for a belief to be correctly aged when someone
+  looks, and a belief nobody reads needs no ageing. Construction takes `started_at` for the same
+  reason: a clock read there would still be a clock read.
+
+- **Lazily-evaluated state cannot push, and that is what moved materiality out.** If decay is computed
+  only when read, then during a silence *nobody computes it*, so the model can never discover that
+  `self_` has drifted and can never emit. Whoever wants to know that a continuous signal has moved must
+  go and look — which is why the render threshold belongs to the response loop, the component that
+  knows what the face is currently showing.
+
+- **Fold, never overwrite, and the fold must build new `AffectVector` objects.** An appraisal computed
+  from the state at *t₀* arriving at *t₀+2s* must not assign over newer evidence. And `frozen=True`
+  protects a vector's binding, not its `values` mapping — so an in-place fold would change a snapshot
+  *while a language-model call was in flight against it*, giving a torn read with no error attached.
+
+- **The fold has two independent knobs — `weight` and `refresh` — and v0.6 corrected what the second
+  one governs.** v0.5 defined it as the belief's ageing clock. That cannot work: decay composes,
+  `D(D(v,a),b) = D(v,a+b)`, so a fold that re-anchors and one that does not produce the identical
+  belief at every later instant. Proved algebraically and measured at a difference of **zero**, against
+  the design's predicted 42% of a materiality step. `refresh` renews the belief's **currency** —
+  when it was last established by evidence substantial enough to count — which is a claim about
+  staleness rather than magnitude, and is what the design's own diagnosis had been pointing at.
+
+- **So each target carries two instants.** `valid_at` moves on every fold and is what `state_at` ages
+  from; `fresh_since` moves only when a policy says `refresh`, and is what the policy's `elapsed_s`
+  reports. Currency appears in no record and is recoverable only by replaying the evidence in order —
+  which is precisely why the reconstruction test belongs at this step rather than at step 12.
+
+- **The policies know nothing about targets; `belief.py` owns the table.** `EXPRESSED` is assigned
+  rather than weighted because of which policy it maps to, not because of a branch inside one. The same
+  structural answer `decay.py` gives: it ages one vector against one representation and has no concept
+  of target at all.
+
+- **"`EXPRESSED` never decays" is enforced twice, and neither alone would be enough.** `half_lives`
+  refuses an `EXPRESSED` key **by name** at construction, and `state_at` never calls `decayed()` on it.
+  One of the two alone is a convention; together the claim has nowhere to fail.
+
+- **`confidence = None` means *unstated* and cannot be configured to mean certainty.**
+  `ConfidenceWeighted` refuses to be built with an unstated-confidence of 1.0 or above, because a
+  decoder that declined to answer must not thereby gain maximum influence over the belief while an LLM
+  honestly reporting 0.7 becomes the weaker of the two.
+
+- **`observe` is synchronous, and must stay so.** Publishing is synchronous and the state writer is a
+  plain callable, so the evidence loop has no `await` between taking an item off the queue and marking
+  it done: an item is either fully folded and published, or never taken. An `async` fold would destroy
+  that atomicity silently and reintroduce the shutdown hang the loop's `finally` prevents.
+
+- **`state_at` answers now or later, never earlier.** A query into the past raises rather than
+  guessing. That is not a limitation to work around: the past is recovered by *replaying* the evidence,
+  and a live model that answered about an instant before its own anchor would be inventing the very
+  thing replay exists to reconstruct.
+
+- **The reconstruction guarantee is tested, not promised — and in two stages.** `evidence.jsonl` does
+  not exist until the recording step, so a test written only against the file would leave the guarantee
+  undefended through the model, the planner and the render loop, every one of which can break it.
+  [`test_reconstruction.py`](../tests/test_reconstruction.py) rebuilds from what the observer registry
+  **published**, not from the list the test submitted; the file version extends it later with the same
+  assertions. Demonstrated: with the loop patched to drop one target's evidence from the record, **142
+  of 144 tests still pass** and only this one fails.
+
+- **No parameter has a default, anywhere in the model.** Every one is a parameter of the behaviour
+  being evaluated and so belongs in the run manifest — and a defaulted parameter is one that can be
+  omitted from a manifest and then differ silently between two runs claiming to be the same.
+
+### Considered and rejected
+
+- **`refresh` as the ageing clock**, which is what the design said for one day. Rejected on proof
+  rather than preference: under any composable decay it is a no-op, and composability is what the
+  replay guarantee itself depends on. The two requirements were contradictory and the design was
+  bumped.
+
+- **Breaking composability instead** — a hold-then-fade decay curve would make an ageing-clock
+  `refresh` real. It would also forfeit replay, and the test that guards it.
+
+- **A periodic sampler publishing `state_at(now)`.** Every row would be recomputable from the anchors,
+  so it materialises a view rather than capturing information. The cheaper variants are worse:
+  publishing on every *read* records reads — a renderer at 10 Hz plus a planner at 2 Hz is 720 rows for
+  a minute in which nothing happened — and publishing on material change reinstates the display memory
+  a belief store has no business holding.
+
+- **A scalar `decayed(magnitude, …)`.** It puts the loop over axes in every caller, which is exactly
+  where the deep-immutability rule breaks: a caller-owned loop can update `vector.values[axis]` in
+  place under a snapshot. Verified that it does, silently. The whole-vector signature removes the
+  chance structurally rather than relying on callers behaving.
+
+- **Passing a bare `rest` float instead of the representation.** Passing the representation lets
+  `decayed()` catch a vector aged against the wrong one, naming both identifiers, where the bare float
+  would silently use whatever number it was handed.
+
+- **Clamping out-of-order evidence to zero elapsed.** It would keep the session alive at the cost of
+  writing a value nothing can account for. Producers stamp `at` at creation and the queue is FIFO, so a
+  violation is a bug, and a slow appraisal carries its staleness in `computed_from` rather than in `at`.
+
+- **Letting the fold accept a partial vector.** An axis present on one side and absent on the other
+  means either "no claim, leave it alone" or "claimed nothing" — opposite behaviours that would be
+  settled by accident. The decoder already guarantees completeness for this exact reason, so the guard
+  holds it to its word. Note the asymmetry it catches: a *missing* axis fails loudly on its own, but an
+  *extra* one is dropped in silence.
+
+- **Reconstructing from the evidence the test submitted.** That would prove only that the model is
+  deterministic. Rebuilding from what was *published* is what pins the claim that the record is
+  sufficient.
+
+- **Making the model a port.** It owns state and a lifetime rather than being a transform, so nothing
+  declares a `Protocol` for it; the evidence loop reaches it through the `StateWriter` callable alias.
+  An `update(observed) -> AffectState` signature is what once made it look like a pipeline stage.

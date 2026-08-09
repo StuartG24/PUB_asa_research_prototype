@@ -4,10 +4,11 @@ How `asa-research-prototype` is put together: the entry points, then a file-by-f
 The [README](../README.md) covers *how to run* the project; this document covers *what the pieces
 are*. For *why* they are built this way, see [Design decisions](decisions.md).
 
-**The agent runs as far as the fold.** `uv run asa` hears a line of text, publishes it, decodes it
-into an affect estimate, submits that to the evidence queue — and stops at the affect model, which is
-a deliberate stub that raises rather than inventing a belief. The response side (encode, express,
-embodiment) is not built. See [Roadmap](roadmap.md) for what is where.
+**The agent hears, decodes and believes.** `uv run asa` hears a line of text, publishes it, decodes
+it into an affect estimate, submits that to the evidence queue, and the affect model folds it into a
+belief that ages on its own. What it does *not* do is act: nothing reads the belief back, so the
+response side — plan, encode, express, embodiment — is not built, and the agent forms an inner state
+that reaches nobody. See [Roadmap](roadmap.md) for what is where.
 
 Relative links below are written from the repository root.
 
@@ -120,17 +121,23 @@ asa_research_prototype/
 │       │   ├── decode_keyword.py #     a lexicon per representation, utterance -> AffectObservation
 │       │   └── drive.py        #       the driver: hear, publish, decode, submit
 │       ├── affect_model/       #     the research core — sole writer of state
-│       │   └── belief.py       #       AffectModel — a STUB that raises; build step 6 replaces it
+│       │   ├── belief.py       #       AffectModel — the per-target table, observe(), state_at(t)
+│       │   ├── folding.py      #       how evidence moves a belief: two knobs, a seam, two policies
+│       │   └── decay.py        #       how a belief ages when nothing arrives — toward rest, not zero
 │       └── _tools/             #     private dev utilities, not part of the public API
 │           ├── custom_logging.py   #       setup_logging() — one stdout handler, app loggers raised
 │           ├── depreport.py        #       dependency table with installed version and release date
 │           └── portcheck.py        #       live Jupyter kernels, port holders, stale-file cleanup
-├── tests/                      # pytest suite — 96 passing, 1 skipped without a robot
+├── tests/                      # pytest suite — 144 passing, 1 skipped without a robot
 │   ├── test_affect.py          #   the record types: timezone guards, tuple coercion, asdict behaviour
 │   ├── test_expression.py      #   the expression types, and the facial vocabulary pinned whole
 │   ├── test_representations.py #   declaration guards, no defaults, axis vocabularies pinned whole
 │   ├── test_observers.py       #   a broken observer is logged and dropped, never reaching control flow
 │   ├── test_loops.py           #   one fold = one evidence row then one state row; drain; fatal folds
+│   ├── test_decay.py           #   the half-life property, composability, and the three guards
+│   ├── test_folding.py         #   the fold arithmetic, its guards, and None never meaning certainty
+│   ├── test_belief.py          #   cold start, per-target policy, the two markers coming apart
+│   ├── test_reconstruction.py  #   a run rebuilt from the evidence it PUBLISHED — and made to diverge
 │   ├── test_perception.py      #   the console does not freeze the loop; the driver's publish/submit order
 │   ├── test_runtime.py         #   teardown from the outside — wrapped in wait_for, since failure means a hang
 │   ├── test_cli.py             #   argument parsing, config fallback, and that the default path never touches a robot
@@ -294,17 +301,45 @@ docstring. It publishes the utterance *before* decoding it, so a failed decode s
 utterance in the record, and it takes a bound `submit` method rather than the evidence loop, so it
 cannot reach `drain()`.
 
-### `src/asa/affect_model/` — the research core, not yet built
+### `src/asa/affect_model/` — the research core
 
-[`belief.py`](../src/asa/affect_model/belief.py) holds `AffectModel`, and `observe()` **raises
-`NotImplementedError`**. That is deliberate: a placeholder that averaged its inputs would run, publish
-plausible state rows, and leave a recording indistinguishable from a working agent's — the one failure
-mode research data cannot survive. Raising makes the missing component missing rather than quietly
-wrong.
+Three modules: the model, and the two strategies it calls. The model is **not a port** — it owns
+state and a lifetime rather than being a transform, so nothing declares a protocol for it and the
+evidence loop reaches it through the `StateWriter` callable alias. That is also why it is named
+`belief.py` rather than `model.py`: there is no strategy to name, so the module is named for what it
+holds.
 
-The model is **not a port**. It owns state and a lifetime rather than being a transform, so nothing
-declares a protocol for it and the evidence loop reaches it through the `StateWriter` callable alias.
-`folding.py` and `decay.py` arrive beside `belief.py` when step 6 lands.
+[`belief.py`](../src/asa/affect_model/belief.py) holds `AffectModel` — the sole author of
+`AffectState`. It owns **no clock**: every instant arrives as a parameter, and decay is evaluated
+lazily at read time, so nothing runs on a schedule for a belief to be correctly aged when someone
+asks. Two entry points:
+
+| Method | Does |
+| --- | --- |
+| `observe(evidence)` | age the target's belief to the evidence's instant, ask that target's policy, fold, store, and return the state it produced. **Synchronous**, which the evidence loop's atomicity depends on |
+| `state_at(t)` | the belief at `t` — a pure function of the evidence folded so far. Answers *now or later, never earlier*: a query into the past raises rather than guessing, because the past is recovered by replaying the evidence |
+
+Everything is **per target**, and the differences are enforced rather than remembered. Each target
+maps to its own fold policy, and each carries two instants: `valid_at`, which moves on every fold and
+is what `state_at` ages from, and `fresh_since`, which moves only when a policy renews the belief's
+*currency*. `EXPRESSED` neither decays nor can be configured to — `half_lives` refuses a key for it
+by name, and `state_at` never calls `decayed()` on it.
+
+[`folding.py`](../src/asa/affect_model/folding.py) is how evidence moves a belief. `folded()` is the
+arithmetic; `FoldDecision` carries the two knobs (`weight` and `refresh`); `FoldPolicy` is the
+`Protocol` pinning what a policy is handed — the evidence *entire*, the current belief, and the time
+since the belief was last renewed. Two policies ship: `ConfidenceWeighted`, which cannot be
+constructed to treat an unstated confidence as certainty, and `Assign`, for evidence that is a fact
+rather than an estimate. The policies know nothing about targets; `belief.py` owns that table.
+
+[`decay.py`](../src/asa/affect_model/decay.py) is how a belief ages when nothing arrives: one
+exponential per axis, toward the **representation's `rest`** rather than toward zero, with time as a
+parameter. It takes a whole vector rather than a magnitude, so no caller can hold the axis loop and
+mutate a snapshot in place, and it is handed the representation rather than a bare `rest` float so it
+can reject a vector aged against the wrong one.
+
+Nothing reads the belief back yet. `state_at` has no caller outside the tests until the intention
+planner arrives, which is what makes the current agent one that believes without acting.
 
 ### `src/asa/_tools/` — private development utilities
 
@@ -334,6 +369,10 @@ returns `None` and both exit 0; the point is that the two entry paths cannot div
 | [`test_observers.py`](../tests/test_observers.py) | A raising observer is logged and dropped, the other observers still run, and the failure handler never reads the event |
 | [`test_loops.py`](../tests/test_loops.py) | One fold publishes exactly one evidence row then one state row *in that order*; `drain()` returns only once everything submitted is folded; a failing `StateWriter` raises out of `run` rather than being absorbed, and the failed item is still acknowledged so the failure cannot become a hang |
 | [`test_perception.py`](../tests/test_perception.py) | That reading does not freeze the event loop — asserted by advancing a counter task concurrently — and the driver's publish-then-decode ordering, pinned from both sides |
+| [`test_decay.py`](../tests/test_decay.py) | The property the module exists to have — one half-life halves the distance to **rest**, checked against a representation whose rest is not zero, since heading for zero and heading for rest agree only when they coincide. Plus composability, which reconstruction depends on, and the three guards |
+| [`test_folding.py`](../tests/test_folding.py) | The fold arithmetic at both ends of the weight and in between; that both inputs survive untouched; the representation, completeness and range guards; and the one claim here that is not a matter of taste — an unstated `confidence` weighs less than a stated certainty, and a policy cannot be built to say otherwise |
+| [`test_belief.py`](../tests/test_belief.py) | A belief exists before any evidence and is at **rest** rather than zero — the only test in the suite that can tell those apart. Then the two markers coming apart under hesitant evidence, per-target policy, `EXPRESSED` neither ageing nor configurable to, and the refusal to answer about the past |
+| [`test_reconstruction.py`](../tests/test_reconstruction.py) | The guarantee that a run is recomputable from its evidence, rebuilt from what the observer registry **published** rather than from what the test submitted — so it fails if the record ever stops being sufficient. Two tests then vary one recorded parameter each and require the rebuild to diverge, since a reconstruction that cannot fail proves nothing. Wrapped in `asyncio.wait_for` for the same reason as `test_runtime.py` |
 | [`test_runtime.py`](../tests/test_runtime.py) | The teardown from the outside: everything submitted is folded before `run_agent` returns, the agent returns at all when input ends, one input produces utterance→evidence→state across three publishers, and a failing model ends the session rather than hanging. Wrapped in `asyncio.wait_for`, unlike every other test file, because the characteristic failure here is a hang |
 | [`test_types.py`](../tests/test_types.py) | Runs `pyright` over `src` **and** `tests`. Ruff does not type-check, so without this the whole class of error is editor-only |
 | [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that `--host` falls back to configuration when absent and beats it when given; that an unreachable Furhat exits 1 rather than raising; that the demo path stops the session even when the interaction fails but not when the start does; and that the **default path composes the agent and never touches the robot** |
