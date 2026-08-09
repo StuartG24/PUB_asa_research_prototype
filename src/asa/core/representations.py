@@ -52,6 +52,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from asa.core.affect import AffectVector
+
 #
 # ── The descriptor ──────────────────────────────────────────────────────────────────────
 #
@@ -117,6 +119,25 @@ class AffectRepresentation:
             raise ValueError(
                 f"{self.id} rests at {self.rest}, outside its range {self.value_range}"
             )
+
+    def rest_vector(self) -> AffectVector:
+        """Every axis at ``rest`` — this representation's neutral, as a vector.
+
+        Three call sites wanted it before it existed: the affect model's cold start, which must
+        hold a belief before any evidence arrives (§4); a benchmark row's unannotated axes; and
+        every test that needs a complete vector. Written out three times it would eventually be
+        written *wrongly* once — as a zero vector, which is only coincidentally the same thing
+        and only for the two representations declared here. That is the exact mistake ``rest``
+        exists to prevent, so the descriptor that owns ``rest`` is what should build it.
+
+        **This is the one place ``representations`` reaches into ``affect``, and the direction
+        matters.** A representation knowing how to make a container is the specific knowing the
+        general. The reverse would not be: ``affect`` stays entirely ignorant of what any
+        identifier means, which is what lets a recorded row name a representation this build no
+        longer declares and still load.
+        """
+        return AffectVector(representation=self.id,
+                            values=dict.fromkeys(self.axes, self.rest))
 
 #
 # ── basic4/1 ────────────────────────────────────────────────────────────────────────────

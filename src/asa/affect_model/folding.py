@@ -118,11 +118,9 @@ def folded(*, belief: AffectVector, estimate: AffectVector,
     if not 0.0 <= weight <= 1.0:
         raise ValueError(f"weight must be between 0.0 and 1.0, got {weight}")
 
-    return AffectVector(
-        representation=rep.id,
-        values={axis: belief.values[axis] + (estimate.values[axis] - belief.values[axis]) * weight
-                for axis in rep.axes},
-    )
+    return AffectVector(representation=rep.id,
+                        values={axis: belief.values[axis] + (estimate.values[axis] - belief.values[axis]) * weight
+                                for axis in rep.axes})
 
 #
 # ── The two knobs ───────────────────────────────────────────────────────────────────────
@@ -230,10 +228,8 @@ class ConfidenceWeighted:
         """Resolve the confidence, then scale the weight by it and threshold the refresh."""
         confidence = (self.unstated_confidence if evidence.confidence is None
                       else evidence.confidence)
-        return FoldDecision(
-            weight=self.max_weight * confidence,
-            refresh=confidence >= self.refresh_above,
-        )
+        return FoldDecision(weight=self.max_weight * confidence,
+                            refresh=confidence >= self.refresh_above)
 
 
 @dataclass(frozen=True)

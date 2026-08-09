@@ -30,6 +30,8 @@ from pathlib import Path
 
 from asa._tools.custom_logging import setup_logging
 from asa.affect_model.belief import AffectModel
+from asa.affect_model.folding import Assign, ConfidenceWeighted
+from asa.core.affect import Target, utc_now
 from asa.core.config import load_config
 from asa.core.observers import Observers
 from asa.core.representations import EKMAN6
@@ -80,7 +82,22 @@ def main(argv: list[str] | None = None) -> None:
     observers = Observers()
     source = TextConsole()
     decoder = KeywordDecoder(representation=EKMAN6, table=EKMAN6_KEYWORDS)
-    model = AffectModel()
+
+    # The affect model's parameters are fixed here until `[affect]` lands in configuration
+    # (design §11, which currently has no home for three of them). Every value below is a
+    # parameter of the behaviour being evaluated and belongs in the run manifest, so this
+    # hardcoding is the same provisional arrangement as EKMAN6 above and goes the same way.
+    # SELF assigns because §11 sets `self_fold_weight = 1.0` for iteration 1 — a blended
+    # self-state would muddy the recognition stimulus. EXPRESSED assigns because it is a fact.
+    model = AffectModel(representation=EKMAN6,
+                        policies={Target.OTHER: ConfidenceWeighted(unstated_confidence=0.5, max_weight=1.0,
+                                                                   refresh_above=0.5),
+                                  Target.SELF: Assign(),
+                                  Target.EXPRESSED: Assign(),
+                                  },
+                        half_lives={Target.OTHER: 45.0, Target.SELF: 45.0},
+                        started_at=utc_now(),
+                        )
 
     # The only place that owns an event loop, so run_agent stays loop-agnostic and a
     # notebook — which already has one — can await it directly.

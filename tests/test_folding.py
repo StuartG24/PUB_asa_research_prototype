@@ -42,10 +42,10 @@ def _evidence(confidence: float | None = None) -> AffectEvidence:
                           confidence=confidence, source="test:decoder")
 
 
-POLICIES: tuple[FoldPolicy, ...] = (
-    ConfidenceWeighted(unstated_confidence=0.5, max_weight=1.0, refresh_above=0.5),
-    Assign(),
-)
+POLICIES: tuple[FoldPolicy, ...] = (ConfidenceWeighted(unstated_confidence=0.5, max_weight=1.0,
+                                                       refresh_above=0.5),
+                                    Assign(),
+                                    )
 """Both shipped policies, bound *through the protocol*.
 
 The conformance claim is **static**, so the annotation is the test and `pyright` is what runs
