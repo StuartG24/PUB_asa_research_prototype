@@ -168,7 +168,8 @@ asa_research_prototype/
 │       ├── perception/         #     the producer side of the cycle
 │       │   ├── base.py         #       InputSource and AffectDecoder — the two ports
 │       │   ├── text_console.py #       typed input, read on a worker thread so the loop stays free
-│       │   ├── decode_keyword.py #     a lexicon per representation, utterance -> AffectObservation
+│       │   ├── decode_keyword.py #     one algorithm over a table; the built-in tables; restrict()
+│       │   ├── nrc_eil.py       #       the NRC lexicon as tables — a prepared artefact, not shipped
 │       │   └── drive.py        #       the driver: hear, publish, decode, submit
 │       ├── affect_model/       #     the research core — sole writer of state
 │       │   ├── belief.py       #       AffectModel — the per-target table, observe(), state_at(t)
@@ -178,7 +179,7 @@ asa_research_prototype/
 │           ├── custom_logging.py   #       setup_logging() — one stdout handler, app loggers raised
 │           ├── depreport.py        #       dependency table with installed version and release date
 │           └── portcheck.py        #       live Jupyter kernels, port holders, stale-file cleanup
-├── tests/                      # pytest suite — 144 passing, 1 skipped without a robot;
+├── tests/                      # pytest suite — 166 passing, 1 skipped without a robot;
 │                               #   see the table below for what each file covers
 ├── docs/                       # Project documentation
 │   └── architecture.md         #   this file — entry points, imports, file-by-file walkthrough
@@ -248,6 +249,20 @@ so requiring every caller to build one would be ceremony rather than composition
 registry *is* constructed here, for the opposite reason: which observers watch a run is exactly a
 per-run choice.
 
+**`--lexicon` chooses which table the decoder runs over, and omitting it keeps the built-in ones**,
+so a plain `uv run asa` decodes as it did before the lexicon existed. That default is deliberate:
+the lexicon is an opt-in second instrument, and the rule-versus-lexicon comparison needs both arms
+available unchanged. A missing or unloadable artefact is treated as an operator problem exactly as
+an unreachable Furhat is — one logged line and exit 1, rather than a traceback through `json`.
+
+This is the one place a research choice is a command-line flag rather than a constant awaiting its
+configuration key. `EKMAN6` and the affect model's parameters are hardcoded here with a comment
+naming the key that will replace them, because they are stable and meaningful in committed code. A
+path to an untracked, dated artefact is neither, so committing one would be committing a fact about
+one machine on one afternoon. The path is also always explicit and never discovered: prepared
+lexicons accumulate by design, so resolving "the newest matching file" would let the same command
+decode differently a week later.
+
 **`furhat_demo()` has a deletion date.** It exists until `session.py` becomes `embodiment/furhat.py`,
 at which point the robot reaches the agent through the `Embodiment` port and this path goes. It
 replaced an earlier `run_session()`/`interaction()` split whose stated justification — that the body
@@ -295,7 +310,7 @@ standard library and its siblings.
 | ------ | ----- |
 | [`affect.py`](../src/asa/core/affect.py) | The affect records — `AffectVector`, `Utterance`, `AffectEvidence` (aliased `AffectObservation`), `AffectState`, `AffectHistory`, `Target`, and the shared `utc_now`/`new_id`/`_require_aware` helpers |
 | [`expression.py`](../src/asa/core/expression.py) | The expression records — `FacialPrototype`, `FacialVector`, `FacialChannel`, `VoiceChannel`, `ExpressionPlan`, `ExpressionCondition` |
-| [`representations.py`](../src/asa/core/representations.py) | What axis names *mean*: `AffectRepresentation`, the `FourEmotions`/`SixEmotions` vocabularies, `BASIC4`, `EKMAN6` and the `REPRESENTATIONS` registry |
+| [`representations.py`](../src/asa/core/representations.py) | What axis names *mean*: `AffectRepresentation`, the `FourEmotions`/`SixEmotions`/`EightEmotions` vocabularies, `BASIC4`, `EKMAN6`, `PLUTCHIK8` and the `REPRESENTATIONS` registry. `plutchik8/1` is the NRC lexicon's own basis and is **diagnostic rather than scoreable** — the benchmark frame has no `anticipation` or `trust` column, so what it answers is how often a signal lands where Ekman's six cannot reach |
 | [`observers.py`](../src/asa/core/observers.py) | `Event` (a structural protocol), the `Observer` callable alias, and `Observers` — publish-only, synchronous, exceptions contained |
 | [`loops.py`](../src/asa/core/loops.py) | `EvidenceLoop`, which owns its queue, and the `StateWriter` alias the affect model satisfies |
 | [`config.py`](../src/asa/core/config.py) | `load_config()` — packaged defaults, then an override file; unknown keys raise |
@@ -322,11 +337,32 @@ inheriting, so a fake in a test is a class with that method and nothing else.
 loop. The reader is injected rather than patched, so a notebook can supply its own end-of-input
 sentinel — no notebook frontend can send a real EOF.
 
-[`decode_keyword.py`](../src/asa/perception/decode_keyword.py) holds one lexicon per representation and
-a `KeywordDecoder` constructed with the pair. It validates its table against its representation once
-at construction rather than per call, fills every axis (at rest where nothing fired), combines several
+[`decode_keyword.py`](../src/asa/perception/decode_keyword.py) holds one matching algorithm, the
+built-in tables, and a `KeywordDecoder` constructed with a representation, a table **and the name of
+the lexicon that table came from**. It validates its table against its representation once at
+construction rather than per call, fills every axis (at rest where nothing fired), combines several
 matches per axis with `max`, and writes the words that fired into `rationale` as `axis=word` pairs.
 `confidence` is left `None` — a keyword matched or it did not.
+
+The lexicon name is required and reaches every record as `decoder:rule:<lexicon>`. One algorithm over
+two tables is **two instruments**, so without it a built-in run and a lexicon run would write
+identical `source` strings over the same representation and be indistinguishable in the evidence —
+which is the comparison the second table exists to make.
+
+The same module holds `restrict(table, source, target)`, which derives a table for a coarser
+representation whose axes the finer one already declares. The check is
+`set(target.axes) - set(source.axes)`, so `plutchik8/1` → `ekman6/1` passes (dropping `anticipation`
+and `trust`) while `plutchik8/1` → `basic4/1` raises on its merged axes. **Selection is allowed,
+merging is not**, and no representation is named in the check.
+
+[`nrc_eil.py`](../src/asa/perception/nrc_eil.py) turns the NRC Emotion Intensity Lexicon into tables
+of that same shape. The lexicon may be used for research but **not redistributed**, so it is not
+shipped beside the module that reads it: `notebooks/lexicons.ipynb` converts the published TSV into
+a JSON artefact under the gitignored `data_in/`, and `load_tables(path, wanted)` reads that. The
+artefact is **format only** — no mapping, no renaming, no thresholding — so every decision that
+changes what the decoder believes stays in this module, and regenerating the file is a no-op. Two
+guards refuse a file whose emotions do not match the mapping in either direction, which is what
+catches loading the older four-emotion lexicon by mistake.
 
 [`drive.py`](../src/asa/perception/drive.py) is the driver: nine lines of code under a much longer
 docstring. It publishes the utterance *before* decoding it, so a failed decode still leaves the
@@ -397,17 +433,18 @@ returns `None` and both exit 0; the point is that the two entry paths cannot div
 | --------- | ------ |
 | [`test_affect.py`](../tests/test_affect.py) | The guards and the properties other components depend on: naive datetimes rejected, `AffectHistory`'s list→tuple coercion, sequence immutability, the empty window a cold start hits, and that `asdict()` leaves datetimes unserialised |
 | [`test_expression.py`](../tests/test_expression.py) | The expression records, with the facial vocabulary pinned **whole** — `BIG_SMILE` and `NEUTRAL` were removed for reasons invisible at the point someone would re-add one |
-| [`test_representations.py`](../tests/test_representations.py) | Declaration guards (no axes, duplicate axis, inverted range, rest outside it), the tuple coercion, that no property has a default, and both axis vocabularies pinned whole |
+| [`test_representations.py`](../tests/test_representations.py) | Declaration guards (no axes, duplicate axis, inverted range, rest outside it), the tuple coercion, that no property has a default, and all three axis vocabularies pinned whole **and in order** — order is the column order of every record, so a reorder makes two pilots incomparable while every `schema` tag still matches. Also that `ekman6/1` is a strict subset of `plutchik8/1`, the fact the derived tables depend on |
 | [`test_observers.py`](../tests/test_observers.py) | A raising observer is logged and dropped, the other observers still run, and the failure handler never reads the event |
 | [`test_loops.py`](../tests/test_loops.py) | One fold publishes exactly one evidence row then one state row *in that order*; `drain()` returns only once everything submitted is folded; a failing `StateWriter` raises out of `run` rather than being absorbed, and the failed item is still acknowledged so the failure cannot become a hang |
-| [`test_perception.py`](../tests/test_perception.py) | That reading does not freeze the event loop — asserted by advancing a counter task concurrently — and the driver's publish-then-decode ordering, pinned from both sides |
+| [`test_perception.py`](../tests/test_perception.py) | That reading does not freeze the event loop — asserted by advancing a counter task concurrently — and the driver's publish-then-decode ordering, pinned from both sides. Then `restrict`'s four cases (subset, identity, a refused merge, a refused widening) and that a derived table does not alias its parent; and that two decoders over one representation with different lexicons write **different** `source` values, which nothing else asserts |
+| [`test_nrc_eil.py`](../tests/test_nrc_eil.py) | The loader, against an artefact built in `tmp_path` so **no download is needed and CI covers it**: `joy` mapping to `happiness`, one table per requested representation, a refused `basic4/1`, `source` read from the file rather than assumed, a `floor` that both drops entries and reaches the name, and the two guards for a file whose emotions do not match the mapping in either direction |
 | [`test_decay.py`](../tests/test_decay.py) | The property the module exists to have — one half-life halves the distance to **rest**, checked against a representation whose rest is not zero, since heading for zero and heading for rest agree only when they coincide. Plus composability, which reconstruction depends on, and the three guards |
 | [`test_folding.py`](../tests/test_folding.py) | The fold arithmetic at both ends of the weight and in between; that both inputs survive untouched; the representation, completeness and range guards; and the one claim here that is not a matter of taste — an unstated `confidence` weighs less than a stated certainty, and a policy cannot be built to say otherwise |
 | [`test_belief.py`](../tests/test_belief.py) | A belief exists before any evidence and is at **rest** rather than zero — the only test in the suite that can tell those apart. Then the two markers coming apart under hesitant evidence, per-target policy, `EXPRESSED` neither ageing nor configurable to, and the refusal to answer about the past |
 | [`test_reconstruction.py`](../tests/test_reconstruction.py) | The guarantee that a run is recomputable from its evidence, rebuilt from what the observer registry **published** rather than from what the test submitted — so it fails if the record ever stops being sufficient. Two tests then vary one recorded parameter each and require the rebuild to diverge, since a reconstruction that cannot fail proves nothing. Wrapped in `asyncio.wait_for` for the same reason as `test_runtime.py` |
 | [`test_runtime.py`](../tests/test_runtime.py) | The teardown from the outside: everything submitted is folded before `run_agent` returns, the agent returns at all when input ends, one input produces utterance→evidence→state across three publishers, and a failing model ends the session rather than hanging. Wrapped in `asyncio.wait_for`, unlike every other test file, because the characteristic failure here is a hang |
 | [`test_types.py`](../tests/test_types.py) | Runs `pyright` over `src` **and** `tests`. Ruff does not type-check, so without this the whole class of error is editor-only |
-| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that `--host` falls back to configuration when absent and beats it when given; that an unreachable Furhat exits 1 rather than raising; that the demo path stops the session even when the interaction fails but not when the start does; and that the **default path composes the agent and never touches the robot** |
+| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that `--host` falls back to configuration when absent and beats it when given; that an unreachable Furhat exits 1 rather than raising; that the demo path stops the session even when the interaction fails but not when the start does; and that the **default path composes the agent and never touches the robot**. Then `--lexicon`: omitted keeps the built-in tables, given swaps both the table and the recorded source name, and a missing or unloadable artefact exits 1 with a message. Those last two assert on `capsys` rather than `caplog`, because `setup_logging` calls `basicConfig(force=True)`, which clears pytest's capturing handler |
 | [`test_config.py`](../tests/test_config.py) | The two-layer load — packaged defaults resolve, a partial override leaves other keys alone, an unknown key or section raises, a missing file names its path. Reading the defaults through `importlib.resources` also proves the TOML is reachable from the installed package |
 | [`test_session.py`](../tests/test_session.py) | `ASASession` against a fake client — the hand-built gesture event asks for monitoring, both connect failures map to `FurhatUnreachable`, `stop()` is idempotent, handlers are registered, the library's stderr handler is stripped |
 | [`test_furhat_integration.py`](../tests/test_furhat_integration.py) | One end-to-end round trip against a live robot. Skipped automatically when nothing is serving on port 9000 |
