@@ -160,7 +160,7 @@ asa_research_prototype/
 │       ├── core/               #     shared foundations — depended on by everything, depending on nothing
 │       │   ├── affect.py       #       AffectVector, Utterance, AffectEvidence, AffectState, AffectHistory, Target
 │       │   ├── expression.py   #       FacialPrototype/Vector, Facial/VoiceChannel, ExpressionPlan, ExpressionCondition
-│       │   ├── representations.py #    what axis names MEAN — basic4/1, ekman6/1, and the registry
+│       │   ├── representations.py #    what axis names MEAN — basic4/1, ekman6/1, plutchik8/1, the registry
 │       │   ├── observers.py    #       Event, Observer, Observers — the publish-only registry
 │       │   ├── loops.py        #       EvidenceLoop — the queue it owns, the consumer task, the drain
 │       │   ├── config.py       #       load_config() — packaged defaults layered with an override file

@@ -13,13 +13,27 @@ and exits 2, so the test would fail for a reason that has nothing to do with the
 which under pytest raises, from somewhere that explains nothing.
 """
 
+import asyncio
+import json
+from pathlib import Path
+
 import pytest
 
 from asa.cli import build_parser, main
+from asa.core.affect import AffectObservation, Utterance, utc_now
 from asa.core.observers import Observers
 from asa.perception.decode_keyword import KeywordDecoder
 from asa.perception.text_console import TextConsole
 from asa.session import FurhatUnreachable
+
+
+async def _unreachable_run_agent(**kwargs: object) -> None:
+    """Stands in for ``run_agent`` where the run must fail before ever reaching it.
+
+    Not a no-op: if a guard under test stops guarding, the CLI would fall through to a real
+    agent whose text console reads stdin, and the test would hang rather than fail.
+    """
+    raise AssertionError("the run should have exited before composing the agent")
 
 
 def _fake_session(events: list[str], *,
@@ -105,6 +119,124 @@ def test_the_default_path_composes_the_agent_and_never_touches_the_robot(monkeyp
     assert isinstance(captured["source"], TextConsole)
     assert isinstance(captured["decoder"], KeywordDecoder)
     assert isinstance(captured["observers"], Observers)
+
+
+#
+# ── Choosing the decoder's table ────────────────────────────────────────────────────────
+#
+
+def _artefact(tmp_path: Path, *, entries: dict | None = None, id_: str = "test-lexicon") -> Path:
+    """A prepared lexicon file with one distinctive word per axis.
+
+    The words are nonsense on purpose. Asserting that "sonorous" decodes proves the *artefact*
+    was read, where a real emotion word would also be in the built-in tables and so would pass
+    whichever table the CLI actually chose.
+    """
+    prepared = {
+        "id": id_,
+        "lexicon": "not-a-real-lexicon",
+        "prepared_by": "tests/test_cli.py",
+        "entries": entries if entries is not None else {
+            "anger": {"sonorous": 0.9},
+            "anticipation": {"vermillion": 0.7},
+            "disgust": {"plangent": 0.9},
+            "fear": {"crepuscular": 0.9},
+            "joy": {"halcyon": 0.9},
+            "sadness": {"lambent": 0.9},
+            "surprise": {"eldritch": 0.8},
+            "trust": {"adamantine": 0.8},
+        },
+    }
+    path = tmp_path / "lexicon.json"
+    path.write_text(json.dumps(prepared), encoding="utf-8")
+    return path
+
+
+def _decode_through(decoder: KeywordDecoder, text: str) -> AffectObservation:
+    """What the composed decoder actually produces — the observable, not a private field."""
+    utterance = Utterance(text=text, source="input:test", at=utc_now())
+    return asyncio.run(decoder.decode(utterance))
+
+
+def _captured_decoder(monkeypatch, argv: list[str]) -> KeywordDecoder:
+    """Run the agent path and hand back the decoder it was composed with."""
+    captured: dict[str, object] = {}
+
+    async def recording_run_agent(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("asa.cli.run_agent", recording_run_agent)
+    main(argv)
+
+    decoder = captured["decoder"]
+    assert isinstance(decoder, KeywordDecoder)
+    return decoder
+
+
+def test_without_a_lexicon_the_built_in_tables_are_used(monkeypatch):
+    """Step 7 must not have changed what `uv run asa` does, and this is where that is pinned.
+
+    The lexicon is an opt-in instrument rather than a replacement: the rule-versus-lexicon
+    comparison needs the hand-written decoder available unchanged, and a default that quietly
+    became the lexicon would retire one arm of it.
+    """
+    got = _decode_through(_captured_decoder(monkeypatch, ["--log", "warning"]),
+                          "I am delighted")
+
+    assert got.source == "decoder:rule:handwritten"
+    assert got.affect.values["happiness"] == 0.9
+
+
+def test_a_lexicon_artefact_replaces_the_table_and_names_itself(monkeypatch, tmp_path):
+    """Both halves of the swap, and the second is what makes the first legible in the data.
+
+    The table changes *and* the recorded source changes with it — read from the artefact
+    rather than assumed, so a run cannot claim a lexicon it did not load.
+    """
+    got = _decode_through(
+        _captured_decoder(monkeypatch, ["--log", "warning", "--lexicon", str(_artefact(tmp_path))]),
+        "everything felt halcyon",
+    )
+
+    assert got.source == "decoder:rule:test-lexicon"
+    assert got.affect.values["happiness"] == 0.9        # a word only the artefact holds
+
+
+def test_a_missing_lexicon_exits_with_a_message(monkeypatch, tmp_path, capsys):
+    """An operator problem gets one line and a non-zero exit, as an unreachable Furhat does.
+
+    Somebody who mistyped a path needs the path back, not a traceback through ``json``.
+
+    **``capsys``, not ``caplog``**, and the reason is worth knowing before reaching for the
+    obvious fixture: ``setup_logging`` calls ``basicConfig(force=True)``, which clears every
+    handler already installed — pytest's capturing handler included — and attaches one of its
+    own to stdout. So ``caplog`` sees nothing while the message is plainly there. Asserting on
+    stdout also tests the thing an operator actually reads.
+    """
+    monkeypatch.setattr("asa.cli.run_agent", _unreachable_run_agent)
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--log", "warning", "--lexicon", str(tmp_path / "absent.json")])
+
+    assert exit_info.value.code == 1
+    assert "absent.json" in capsys.readouterr().out
+
+
+def test_an_artefact_the_loader_refuses_exits_the_same_way(monkeypatch, tmp_path, capsys):
+    """A file that loads as JSON but is not this lexicon — the wrong-download case.
+
+    It reaches a different guard from the missing-file test, and must reach the same outcome:
+    the two are one situation for whoever is running the agent, whatever the loader thought.
+    """
+    monkeypatch.setattr("asa.cli.run_agent", _unreachable_run_agent)
+    four_only = {"anger": {"sonorous": 0.9}, "fear": {"crepuscular": 0.9},
+                 "joy": {"halcyon": 0.9}, "sadness": {"lambent": 0.9}}
+
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--log", "warning", "--lexicon", str(_artefact(tmp_path, entries=four_only))])
+
+    assert exit_info.value.code == 1
+    assert "anticipation, disgust, surprise, trust" in capsys.readouterr().out
 
 
 def test_host_falls_back_to_configuration(monkeypatch):

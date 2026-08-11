@@ -40,6 +40,7 @@ from asa.perception.decode_keyword import (
     LEXICON_HANDWRITTEN,
     KeywordDecoder,
 )
+from asa.perception.nrc_eil import load_tables
 from asa.perception.text_console import TextConsole
 from asa.runtime import run_agent
 from asa.session import ASASession, FurhatUnreachable
@@ -85,8 +86,36 @@ def main(argv: list[str] | None = None) -> None:
     # with its lexicon, and that has no home yet.
     observers = Observers()
     source = TextConsole()
-    decoder = KeywordDecoder(representation=EKMAN6, table=EKMAN6_KEYWORDS,
-                             lexicon=LEXICON_HANDWRITTEN)
+
+    # Which table the one algorithm runs over. The built-in tables are the default, so a run
+    # without `--lexicon` decodes exactly as it did before step 7 — the lexicon is an opt-in
+    # instrument rather than a replacement, and the comparison needs both available unchanged.
+    #
+    # A flag rather than a hardcoded constant, departing from EKMAN6 above deliberately: that
+    # is a research parameter and stable in committed code, whereas a path to an untracked,
+    # dated artefact is wrong on another machine and wrong tomorrow. It is also an explicit
+    # path and never a discovered one — preparations accumulate by design, so resolving "the
+    # newest matching file" would make which instrument a run used depend on what happens to
+    # be in the directory.
+    if args.lexicon is None:
+        table, lexicon = EKMAN6_KEYWORDS, LEXICON_HANDWRITTEN
+    else:
+        try:
+            prepared = load_tables(args.lexicon, [EKMAN6])
+        except (OSError, ValueError) as error:
+            # A missing file, or an artefact failing the loader's guards, is an operator
+            # problem rather than a defect — the same judgement as FurhatUnreachable above.
+            # Someone who mistyped a path or prepared the wrong download needs the message,
+            # not a stack through json and the mapping checks.
+            log.error("%s", error)
+            raise SystemExit(1) from None
+        table, lexicon = prepared.tables[EKMAN6.id], prepared.source
+
+    # Which instrument decoded a session is as load-bearing for reading a transcript as the
+    # design version already logged above, and it is not recoverable from the console output.
+    log.info("Decoder lexicon: %s", lexicon)
+
+    decoder = KeywordDecoder(representation=EKMAN6, table=table, lexicon=lexicon)
 
     # The affect model's parameters are fixed here until `[affect]` lands in configuration
     # (design §11, which currently has no home for three of them). Every value below is a
@@ -124,6 +153,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Furhat address (default: from configuration)")
     parser.add_argument("--config", type=Path, default=None, metavar="FILE",
                         help="TOML file overriding selected configuration keys")
+    # An explicit path, never a directory scan: prepared lexicons accumulate, so discovering
+    # "the newest one" would let a re-run of the same command decode differently next week.
+    parser.add_argument("--lexicon", type=Path, default=None, metavar="FILE",
+                        help="prepared lexicon artefact (default: the built-in tables)")
     parser.add_argument("--furhat-demo", action="store_true",
                         help="run the smile-and-speak connection check instead of the agent")
     return parser
