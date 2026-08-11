@@ -23,28 +23,47 @@ from asa.core.affect import AffectVector
 from asa.core.representations import (
     BASIC4,
     EKMAN6,
+    PLUTCHIK8,
     REPRESENTATIONS,
     AffectRepresentation,
+    EightEmotions,
     FourEmotions,
     SixEmotions,
 )
 
 
 def test_the_declared_axis_vocabularies_are_pinned():
-    """Whole-set comparisons, on the same grounds as the facial vocabulary test.
+    """Whole-vocabulary comparisons, on the same grounds as the facial vocabulary test.
 
     An axis added or removed silently changes the shape of every record written in that
     representation, and old data becomes incomparable with new without anything failing.
-    Pinning the set whole means such a change has to be a deliberate edit here — which is
-    the point, because the reasons for a merged ``fear_surprise`` are invisible at the
-    moment somebody would think to split it.
+    Pinning the vocabulary whole means such a change has to be a deliberate edit here —
+    which is the point, because the reasons for a merged ``fear_surprise`` are invisible at
+    the moment somebody would think to split it.
+
+    **Ordered tuples rather than sets, and the order is the half that was missing.** Declared
+    order *is* the column order of every record: ``rest_vector()`` builds from ``axes`` and the
+    decoder walks ``axes``. A reorder therefore produces two pilots whose columns disagree
+    while every ``schema`` tag still matches — the same silent-incomparability failure as an
+    added axis, and until this test compared tuples nothing in the suite could see it.
+
+    **Literals rather than a computed check**, and deliberately: ``list(axes) == sorted(axes)``
+    would be self-maintaining and would assert the wrong property twice over. It is false for
+    ``basic4/1``, which groups its axes rather than alphabetising them, and it would accept a
+    change from one stable order to another — where what the design needs is *stability*, not
+    alphabetisation. ``SixEmotions`` calls its own order "arbitrary but stable", and stability
+    is exactly what a written-down literal enforces and a sort does not.
     """
-    assert {axis.value for axis in FourEmotions} == {
+    assert tuple(axis.value for axis in FourEmotions) == (
         "happiness", "sadness", "fear_surprise", "anger_disgust",
-    }
-    assert {axis.value for axis in SixEmotions} == {
+    )
+    assert tuple(axis.value for axis in SixEmotions) == (
         "anger", "disgust", "fear", "happiness", "sadness", "surprise",
-    }
+    )
+    assert tuple(axis.value for axis in EightEmotions) == (
+        "anger", "anticipation", "disgust", "fear",
+        "happiness", "sadness", "surprise", "trust",
+    )
 
 
 def test_axis_names_are_usable_as_str_keys():
@@ -152,3 +171,37 @@ def test_the_registry_is_keyed_by_its_own_identifiers():
     assert all(key == rep.id for key, rep in REPRESENTATIONS.items())
     assert REPRESENTATIONS[BASIC4.id] is BASIC4
     assert REPRESENTATIONS[EKMAN6.id] is EKMAN6
+    assert REPRESENTATIONS[PLUTCHIK8.id] is PLUTCHIK8
+
+
+def test_ekman6_is_a_strict_subset_of_plutchik8():
+    """The fact the whole lexicon plan rests on, pinned so it cannot quietly stop being true.
+
+    Every ``ekman6/1`` axis is also a ``plutchik8/1`` axis, so the coarser table is reached by
+    *dropping* two axes and never by combining any. That is what makes deriving one from the
+    other selection rather than merging — and it is exactly the property ``restrict`` will
+    check, so it is worth asserting once here where the representations are declared rather
+    than only where the operation lives.
+
+    ``basic4/1`` is the contrast and belongs in the same test: its merged axes exist in
+    neither of the others, so no amount of dropping reaches it.
+    """
+    assert set(EKMAN6.axes) <= set(PLUTCHIK8.axes)
+    assert set(PLUTCHIK8.axes) - set(EKMAN6.axes) == {"anticipation", "trust"}
+
+    assert set(BASIC4.axes) - set(PLUTCHIK8.axes) == {"anger_disgust", "fear_surprise"}
+
+
+def test_plutchik8_rests_with_every_axis_present():
+    """A vector in this representation carries all eight axes, not the six that overlap.
+
+    ``rest_vector()`` is what seeds a belief and what fills a benchmark row's unannotated
+    axes, so a representation that built a short vector would put incomplete records into
+    research data — and the fold's completeness guard would then reject them at a point far
+    from the cause.
+    """
+    resting = PLUTCHIK8.rest_vector()
+
+    assert resting.representation == "plutchik8/1"
+    assert tuple(resting.values) == PLUTCHIK8.axes           # every axis, in declared order
+    assert set(resting.values.values()) == {0.0}

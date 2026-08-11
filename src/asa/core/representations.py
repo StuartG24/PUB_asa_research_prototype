@@ -218,12 +218,72 @@ EKMAN6 = AffectRepresentation(
 )
 
 #
+# ── plutchik8/1 ─────────────────────────────────────────────────────────────────────────
+#
+
+
+class EightEmotions(StrEnum):
+    """Axis NAMES for ``plutchik8/1`` — the eight primaries, held apart from the wheel.
+
+    Declared because a lexicon has a basis of its own. The NRC Emotion Intensity Lexicon is
+    annotated against these eight, so naming them lets the build read it without asserting a
+    mapping in the act of reading — which is a different and much weaker claim than deciding
+    that one emotion set translates into another.
+
+    The identifier credits Plutchik because a reader of a record needs to know *which* eight.
+    The class name does not, for the same reason ``SixEmotions`` does not: what is declared
+    here is a **basis**, and Plutchik's model is a good deal more than a basis.
+
+    **Flattened, and the flattening happened upstream.** The wheel proper carries opposing
+    pairs (happiness↔sadness, trust↔disgust), intensity gradations and dyads. None of it is
+    modelled here — these are eight independent unipolar axes, exactly as the lexicon
+    publishes them, because its annotation was per word-emotion pair rather than an
+    application of the theory. So this representation is no flatter than ``basic4/1`` or
+    ``ekman6/1``; it is only more conspicuous about it, because the theory it names has
+    structure the others never claimed. Bipolarity stays undeclared here for the same reason
+    it is undeclared on ``AffectRepresentation``.
+
+    **``happiness``, not Plutchik's ``joy``.** The rename costs the lexicon's own vocabulary
+    and buys one axis name per emotion across all three representations, so an analysis can
+    compare that axis without a translation table. The lexicon's term survives in the mapping
+    that reads it, which is where somebody checking the correspondence would look.
+
+    **Two of these axes cannot be scored.** The benchmark frame carries the ``ekman6/1``
+    columns and nothing else, so ``anticipation`` and ``trust`` have no ground truth under it
+    and never will. This representation is therefore **diagnostic rather than a third
+    condition in an accuracy comparison** — it exists to answer how often the strongest
+    lexical signal lands on an axis Ekman's six cannot represent. Anyone reporting accuracy
+    over eight axes has scored two of them against nothing.
+
+    Alphabetical, the same arbitrary-but-stable rule the other two follow.
+    """
+
+    ANGER = "anger"
+    ANTICIPATION = "anticipation"
+    DISGUST = "disgust"
+    FEAR = "fear"
+    HAPPINESS = "happiness"
+    SADNESS = "sadness"
+    SURPRISE = "surprise"
+    TRUST = "trust"
+
+
+PLUTCHIK8 = AffectRepresentation(
+    id="plutchik8/1",
+    axes=tuple(EightEmotions),
+    value_range=(0.0, 1.0),
+    rest=0.0,
+    metric=False,
+)
+
+#
 # ── Registry ────────────────────────────────────────────────────────────────────────────
 #
 
 REPRESENTATIONS: Mapping[str, AffectRepresentation] = {
     BASIC4.id: BASIC4,
     EKMAN6.id: EKMAN6,
+    PLUTCHIK8.id: PLUTCHIK8,
 }
 """Every declared representation, by the identifier that appears in recorded data.
 
