@@ -41,7 +41,7 @@ def test_the_design_version_is_pinned_deliberately():
     string in the repository and tested only that they agreed with each other. The other two
     now assert the properties their names claim, which is what they were always for.
     """
-    assert load_config().design_version == "v0.6"
+    assert load_config().design_version == "v0.6.1"
 
 
 def test_override_replaces_only_the_keys_given(tmp_path):
