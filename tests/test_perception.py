@@ -28,13 +28,14 @@ decoder failure is contained, and that returning means the work is finished.
 
 import asyncio
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 import pytest
 
 from asa.core.affect import AffectEvidence, AffectObservation, Target, Utterance, utc_now
 from asa.core.observers import Event, Observers
-from asa.core.representations import BASIC4, EKMAN6
+from asa.core.representations import BASIC4, EKMAN6, PLUTCHIK8
 from asa.perception.base import AffectDecoder, InputSource
 from asa.perception.decode_keyword import (
     BASIC4_KEYWORDS,
@@ -42,6 +43,7 @@ from asa.perception.decode_keyword import (
     EKMAN6_KEYWORDS,
     NO_MATCH,
     KeywordDecoder,
+    restrict,
 )
 from asa.perception.drive import run_perception
 from asa.perception.text_console import SOURCE, TextConsole
@@ -223,6 +225,94 @@ def test_a_table_naming_axes_the_representation_lacks_is_rejected():
 
     with pytest.raises(ValueError, match="basic4/1 does not have"):
         KeywordDecoder(BASIC4, EKMAN6_KEYWORDS)
+
+
+#
+# ── restrict ────────────────────────────────────────────────────────────────────────────
+#
+
+PLUTCHIK8_SAMPLE: Mapping[str, Mapping[str, float]] = {
+    "anger": {"furious": 0.9},
+    "anticipation": {"eager": 0.7},         # no ekman6 axis to land on
+    "disgust": {"revolted": 0.9},
+    "fear": {"terrified": 0.9},
+    "happiness": {"delighted": 0.9},
+    "sadness": {"devastated": 0.9},
+    "surprise": {"astonished": 0.9},
+    "trust": {"reliable": 0.8},             # no ekman6 axis to land on
+}
+"""A minimal ``plutchik8/1`` table — one word per axis, and the two Ekman cannot name.
+
+Deliberately not the real lexicon. What these tests check is the *operation*, and a fixture
+small enough to read entirely makes a failure legible; a ten-thousand-word table would test
+the same three lines while making every assertion a matter of trust.
+"""
+
+
+def test_restricting_to_a_subset_representation_keeps_exactly_its_axes():
+    """The permitted derivation, and the one the lexicon depends on."""
+    got = restrict(PLUTCHIK8_SAMPLE, PLUTCHIK8, EKMAN6)
+
+    assert tuple(got) == EKMAN6.axes                    # declared order, not the table's
+    assert got["anger"] == {"furious": 0.9}             # values carried across untouched
+    assert "anticipation" not in got
+    assert "trust" not in got
+
+
+def test_restricting_a_representation_to_itself_is_the_identity():
+    """No special case in the loader, which is why this is worth pinning.
+
+    ``load_tables`` will put every requested representation through this function, including
+    the lexicon's own. If identity did not work, that would need a branch — and a branch is
+    a path along which a table could reach a caller unchecked.
+    """
+    got = restrict(PLUTCHIK8_SAMPLE, PLUTCHIK8, PLUTCHIK8)
+
+    assert tuple(got) == PLUTCHIK8.axes
+    assert got == PLUTCHIK8_SAMPLE
+
+
+def test_restricting_onto_merged_axes_is_refused():
+    """The collapse refusal, enforced rather than documented.
+
+    ``basic4/1`` is coarser than ``plutchik8/1`` in the ordinary sense, and that is exactly why
+    the check cannot be "is the target coarser". Its merged axes exist in neither of the other
+    representations, so filling them would mean combining two that do — asserting that fear and
+    surprise are one thing. Both are named, because a message naming one would leave a reader
+    thinking a single edit would fix it.
+    """
+    with pytest.raises(ValueError, match="anger_disgust, fear_surprise"):
+        restrict(PLUTCHIK8_SAMPLE, PLUTCHIK8, BASIC4)
+
+
+def test_restricting_cannot_widen():
+    """The same rule read backwards, and it guards a case the constructor cannot see.
+
+    ``KeywordDecoder``'s guard is the table's axes *minus* the representation's, so it catches
+    extras and structurally cannot catch omissions — an empty axis is legal by design. So an
+    ``ekman6/1`` table paired with ``plutchik8/1`` constructs silently, and since ``StrEnum``
+    members hash as their values, six of eight axes populate: the result looks plausible rather
+    than broken. Refusing to widen is what closes that door on the derived path.
+    """
+    with pytest.raises(ValueError, match="anticipation, trust"):
+        restrict(EKMAN6_KEYWORDS, EKMAN6, PLUTCHIK8)
+
+
+def test_a_restricted_table_does_not_alias_the_one_it_came_from():
+    """A dict comprehension copies the outer mapping and shares the inner ones.
+
+    Without the copy, a write through a derived table reaches the module constant it was
+    derived from and changes what every decoder built afterwards in that process matches on.
+    The annotation does not stop it: ``Mapping`` has no ``__setitem__``, but the object is a
+    ``dict`` and the write succeeds at runtime. Same lesson as ``decay.py``'s — ``frozen`` and
+    read-only annotations protect the binding, never the container.
+    """
+    got = restrict(PLUTCHIK8_SAMPLE, PLUTCHIK8, EKMAN6)
+
+    assert got["anger"] is not PLUTCHIK8_SAMPLE["anger"]
+
+    got["anger"]["incandescent"] = 0.95                 # type: ignore[index]
+    assert "incandescent" not in PLUTCHIK8_SAMPLE["anger"]
 
 
 def test_every_axis_of_the_representation_is_present_at_rest():

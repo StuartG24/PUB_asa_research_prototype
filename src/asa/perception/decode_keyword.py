@@ -160,6 +160,60 @@ fear there, and neither is a subset of the other.
 """
 
 #
+# ── Table operations ────────────────────────────────────────────────────────────────────
+#
+
+
+def restrict(table: Mapping[str, Mapping[str, float]],
+             source: AffectRepresentation,
+             target: AffectRepresentation) -> Mapping[str, Mapping[str, float]]:
+    """A table in one representation, restricted to a coarser one whose axes it already has.
+
+    **Selection, never merging — and the check below enforces that rather than a comment asking
+    nicely.** A target axis the source also declares is carried across as it stands; a target
+    axis the source does not have has no defensible value, so this raises.
+
+    That admits ``plutchik8/1`` → ``ekman6/1``, where dropping ``anticipation`` and ``trust``
+    says only that the coarser representation cannot name them — the rule the tables above
+    already follow for what they have no axis for. It refuses ``plutchik8/1`` → ``basic4/1``,
+    because ``fear_surprise`` is an axis of neither and the only way to fill it would be to
+    combine two axes that are, asserting that fear and surprise are one thing. That is a
+    theoretical claim and it does not get to hide in a helper.
+
+    **So the module's standing rule survives, now stated mechanically rather than in prose:
+    representations differing by *resolution* may be derived one from another; representations
+    differing by *what they claim is the same thing* may not.** No representation is named in
+    the check, so nothing has to be revisited when a fourth arrives.
+
+    **It refuses to widen, and that is the same rule read the other way.** ``ekman6/1`` →
+    ``plutchik8/1`` raises on ``anticipation`` and ``trust`` rather than returning a table with
+    two empty axes. Worth stating because the constructor below *cannot* catch that case — its
+    guard compares the table's axes minus the representation's, so it sees extras and never
+    omissions, and an ``ekman6/1`` table paired with ``plutchik8/1`` builds a decoder whose two
+    unreachable axes sit at rest forever. Since ``StrEnum`` members hash as their values, six of
+    the eight axes would populate and the result would look plausible rather than broken.
+
+    ``source`` is a parameter rather than something read off the table, for the same reason the
+    constructor takes both: a table is a plain mapping and its keys hash as bare strings, so it
+    cannot say which representation it belongs to.
+
+    **The inner mappings are copied, not shared.** A dict comprehension over a nested mapping
+    rebuilds the outer dict and hands back the *same* inner objects, so without ``dict(...)`` a
+    write through a derived table would reach ``EKMAN6_KEYWORDS`` itself and change what every
+    decoder built afterwards in that process matches on. The annotation does not protect it —
+    ``Mapping`` has no ``__setitem__``, but the object is a ``dict`` and the write succeeds at
+    runtime. Same lesson as the deep-immutability trap in ``affect_model/decay.py``: ``frozen``
+    and read-only annotations protect the binding, never the container.
+    """
+    unreachable = set(target.axes) - set(source.axes)
+    if unreachable:
+        named = ", ".join(sorted(unreachable))
+        raise ValueError(
+            f"{source.id} cannot be restricted to {target.id}: no axis for {named}"
+        )
+    return {axis: dict(table.get(axis, {})) for axis in target.axes}
+
+#
 # ── The decoder ─────────────────────────────────────────────────────────────────────────
 #
 
