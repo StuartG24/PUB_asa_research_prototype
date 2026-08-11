@@ -35,7 +35,11 @@ from asa.core.affect import Target, utc_now
 from asa.core.config import load_config
 from asa.core.observers import Observers
 from asa.core.representations import EKMAN6
-from asa.perception.decode_keyword import EKMAN6_KEYWORDS, KeywordDecoder
+from asa.perception.decode_keyword import (
+    EKMAN6_KEYWORDS,
+    LEXICON_HANDWRITTEN,
+    KeywordDecoder,
+)
 from asa.perception.text_console import TextConsole
 from asa.runtime import run_agent
 from asa.session import ASASession, FurhatUnreachable
@@ -81,7 +85,8 @@ def main(argv: list[str] | None = None) -> None:
     # with its lexicon, and that has no home yet.
     observers = Observers()
     source = TextConsole()
-    decoder = KeywordDecoder(representation=EKMAN6, table=EKMAN6_KEYWORDS)
+    decoder = KeywordDecoder(representation=EKMAN6, table=EKMAN6_KEYWORDS,
+                             lexicon=LEXICON_HANDWRITTEN)
 
     # The affect model's parameters are fixed here until `[affect]` lands in configuration
     # (design §11, which currently has no home for three of them). Every value below is a

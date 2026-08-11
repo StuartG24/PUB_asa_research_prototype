@@ -62,7 +62,7 @@ from asa.core.affect import AffectObservation, AffectVector, Target, Utterance
 from asa.core.representations import AffectRepresentation, FourEmotions, SixEmotions
 
 DECODER = "decoder:rule"
-"""This decoder's name, written once — the same placement rule as an adapter's ``SOURCE``.
+"""This decoder's ALGORITHM, written once — the same placement rule as an adapter's ``SOURCE``.
 
 ``rule`` rather than ``keyword``, and the mismatch with the module name is deliberate. The
 vocabulary splits decoders the way the research does, rule against LLM, and it is written
@@ -70,7 +70,23 @@ into every record this ever produces. Recorded strings have to stay readable whe
 around them has been reorganised, so they name the approach rather than the file.
 
 It does **not** name the representation, because the record already carries that on the
-vector. One producer, one name; the representation is a separate axis of the data.
+vector. The representation is a separate axis of the data.
+
+**It is half a producer, not a whole one, and that is why it is no longer the full ``source``.**
+This class is one algorithm over a *table*, so the hand-written tables above and a lexicon run
+identical code. Under a single constant they would write identical ``source`` strings and be
+indistinguishable in ``evidence.jsonl`` — which is precisely the comparison a lexicon would be
+adopted to make. The recorded name is therefore ``<role>:<algorithm>:<lexicon>``, composed in
+the constructor.
+"""
+
+LEXICON_HANDWRITTEN = "handwritten"
+"""The lexicon segment for the two tables in this module.
+
+A module constant because these tables *are* the module — there is no file to ask. A lexicon
+loaded from a prepared artefact is the opposite case and must take its name from what was
+actually read, so that a stale or swapped file cannot be mislabelled by a caller passing a
+constant it remembered. Only the hand-written case gets a name written here.
 """
 
 NO_MATCH = "no keyword matched"
@@ -247,6 +263,14 @@ class KeywordDecoder:
     result, not a construction error. A table naming an axis the representation does not
     have is the opposite case: it is a pairing mistake and cannot be anything else.
 
+    **``lexicon`` is required and has no default, for the reason ``ConfidenceWeighted`` has no
+    defaults.** A default is a value that can be omitted and then differ silently between two
+    runs claiming to be the same — and here the omitted value would be the very field that
+    tells the two conditions apart. A decoder that can be built without naming its table is a
+    decoder that can write ambiguous provenance, which is the whole thing this argument exists
+    to prevent. It is a plain ``str`` rather than an enum for §8.2's reason: the set is open,
+    and a record must stay readable when it names a lexicon this build no longer has.
+
     Stateless in the strong sense the design asks for. It holds nothing between calls, so
     the same sentence decodes to the same vector whenever it arrives, whatever has been said
     before. That is what makes a rule-versus-LLM comparison a comparison of decoders rather
@@ -255,7 +279,8 @@ class KeywordDecoder:
     """
 
     def __init__(self, representation: AffectRepresentation,
-                 table: Mapping[str, Mapping[str, float]]) -> None:
+                 table: Mapping[str, Mapping[str, float]],
+                 lexicon: str) -> None:
         unknown = set(table) - set(representation.axes)
         if unknown:
             named = ", ".join(sorted(unknown))
@@ -264,6 +289,7 @@ class KeywordDecoder:
             )
         self._representation = representation
         self._table = table
+        self._source = f"{DECODER}:{lexicon}"
 
     async def decode(self, utterance: Utterance) -> AffectObservation:
         """One utterance to one observation of the human's affect.
@@ -326,7 +352,7 @@ class KeywordDecoder:
         return AffectObservation(
             target=Target.OTHER,
             affect=AffectVector(representation=self._representation.id, values=values),
-            source=DECODER,
+            source=self._source,
             rationale=("matched: " + ", ".join(matched)) if matched else NO_MATCH,
             of_input=utterance.id,
             at=utterance.at,       # what they felt when they spoke, not when we finished parsing

@@ -41,6 +41,7 @@ from asa.perception.decode_keyword import (
     BASIC4_KEYWORDS,
     DECODER,
     EKMAN6_KEYWORDS,
+    LEXICON_HANDWRITTEN,
     NO_MATCH,
     KeywordDecoder,
     restrict,
@@ -190,11 +191,11 @@ def _decode(decoder: KeywordDecoder, text: str,
 
 
 def _basic4() -> KeywordDecoder:
-    return KeywordDecoder(BASIC4, BASIC4_KEYWORDS)
+    return KeywordDecoder(BASIC4, BASIC4_KEYWORDS, LEXICON_HANDWRITTEN)
 
 
 def _ekman6() -> KeywordDecoder:
-    return KeywordDecoder(EKMAN6, EKMAN6_KEYWORDS)
+    return KeywordDecoder(EKMAN6, EKMAN6_KEYWORDS, LEXICON_HANDWRITTEN)
 
 
 def test_keyword_decoder_satisfies_the_affect_decoder_port():
@@ -221,10 +222,10 @@ def test_a_table_naming_axes_the_representation_lacks_is_rejected():
     downstream validates, because nothing downstream can.
     """
     with pytest.raises(ValueError, match="ekman6/1 does not have"):
-        KeywordDecoder(EKMAN6, BASIC4_KEYWORDS)
+        KeywordDecoder(EKMAN6, BASIC4_KEYWORDS, LEXICON_HANDWRITTEN)
 
     with pytest.raises(ValueError, match="basic4/1 does not have"):
-        KeywordDecoder(BASIC4, EKMAN6_KEYWORDS)
+        KeywordDecoder(BASIC4, EKMAN6_KEYWORDS, LEXICON_HANDWRITTEN)
 
 
 #
@@ -413,10 +414,45 @@ def test_the_record_names_its_producer_and_its_input_and_claims_no_confidence():
     """
     got, utterance = _decode(_basic4(), "I am happy")
 
-    assert got.source == DECODER
+    assert got.source == f"{DECODER}:{LEXICON_HANDWRITTEN}"
     assert got.target is Target.OTHER
     assert got.of_input == utterance.id
     assert got.confidence is None
+
+
+def test_two_lexicons_under_one_algorithm_are_told_apart_by_source():
+    """The property the third source segment exists for, and nothing else asserts it.
+
+    This class is one matching algorithm over a *table*, so two tables run identical code. If
+    ``source`` named only the algorithm, a hand-table run and a lexicon run would write the
+    same string over the same representation and be **indistinguishable in the evidence
+    record** — which is exactly the comparison a second table would be adopted to make. The
+    representation cannot separate them either, since the whole point is to hold it fixed.
+
+    Asserted with a stand-in name rather than a real second lexicon, because the property is
+    about the composition and not about any particular table.
+    """
+    same_table = KeywordDecoder(BASIC4, BASIC4_KEYWORDS, LEXICON_HANDWRITTEN)
+    other_lexicon = KeywordDecoder(BASIC4, BASIC4_KEYWORDS, "some-other-lexicon")
+
+    first, _ = _decode(same_table, "I am happy")
+    second, _ = _decode(other_lexicon, "I am happy")
+
+    assert first.affect == second.affect                    # identical readings ...
+    assert first.source != second.source                    # ... told apart anyway
+    assert second.source == f"{DECODER}:some-other-lexicon"
+
+
+def test_the_lexicon_name_is_required():
+    """No default, for the reason ``ConfidenceWeighted`` has none.
+
+    A default is a value that can be omitted and then differ silently between two runs
+    claiming to be the same — and here the omitted value is the one field distinguishing the
+    conditions. Runtime rather than static because both matter: pyright reports the missing
+    argument, and this fails if somebody later gives it a default to quieten a call site.
+    """
+    with pytest.raises(TypeError, match="missing 1 required"):
+        KeywordDecoder(BASIC4, BASIC4_KEYWORDS)             # type: ignore[call-arg]
 
 
 def test_the_rationale_records_every_word_that_fired():
