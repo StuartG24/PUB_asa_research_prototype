@@ -6,7 +6,7 @@
 #
 [project]
 name = "asa-research-prototype"
-version = "0.2.0"
+version = "0.3.0"
 description = "Research prototype for a basic Artificial Social Agent — uv-managed, packaged."
 readme = "README.md"
 license = "Apache-2.0"
@@ -43,16 +43,20 @@ module-name = "asa"
 # working notebook + test + lint environment. CI can use `--no-default-groups`.
 [dependency-groups]
 notebook = [
+    "datasets>=5.0.1",
     "ipykernel>=7.3.0",
     "ipywidgets>=8.1.8",
     "jupyterlab>=4.6.1",
     "nbclient>=0.11.0",
     "nbformat>=5.10.4",
+    "pandas>=3.0.5",
+    "scikit-learn>=1.9.0",
 ]
 dev = [
     "ruff>=0.15.20",
     "autopep8>=2.3.2",  # formatter over `ruff format`: preserves hand-arranged signatures (ruff stacks all-or-nothing)
     "pytest>=9.1.1",
+    "pyright[nodejs]>=1.1.411",  # [nodejs] ships node as a wheel: lock-pinned, no download at first run
     { include-group = "notebook" },
 ]
 
@@ -69,6 +73,14 @@ select = ["E", "F", "I", "UP", "B", "Q"]
 # More relaxed about line-length format in Notebooks
 [tool.ruff.lint.per-file-ignores]
 "notebooks/*.ipynb" = ["E501"]
+
+# Pylance reads this section too, so the checking mode lives here rather than in
+# .vscode/settings.json — one source of truth for the editor and for tests/test_types.py.
+# "standard" catches real bugs without flagging "unknown type" from under-typed deps.
+[tool.pyright]
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

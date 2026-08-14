@@ -114,8 +114,9 @@ class ASASession:
         """Speak one utterance, interrupting anything already in progress."""
         await self._client.request_speak_text(text=text, wait=True, abort=True)
 
-    async def gesture(self, name: str, intensity: float = 1.0,
-                      duration: float = 1.0, *, wait: bool = False) -> None:
+    async def gesture(self, name: str,
+                      intensity: float = 1.0, duration: float = 1.0, *,
+                      wait: bool = False) -> None:
         """Play a named gesture — "Smile", "BigSmile", "Blink" and the rest of the set.
 
         ``wait`` defaults to False, unlike say(), so the gesture runs *alongside* whatever
@@ -123,8 +124,9 @@ class ASASession:
         wait=True when the next action genuinely must not begin until the face has settled.
         """
         if wait:
-            await self._client.request_gesture_start(name=name, intensity=intensity,
-                                                     duration=duration, wait=True)
+            await self._client.request_gesture_start(name=name,
+                                                     intensity=intensity, duration=duration,
+                                                     wait=True)
             return
 
         # The client ties its "monitor" protocol flag to `wait`, so asking it not to block
@@ -134,8 +136,7 @@ class ASASession:
         await self._client.send_event({
             "type": Events.request_gesture_start,
             "name": name,
-            "intensity": intensity,
-            "duration": duration,
+            "intensity": intensity, "duration": duration,
             "monitor": True,
         })
 

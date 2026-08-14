@@ -2,12 +2,14 @@
 
 How `asa-research-prototype` is put together: the entry points, then a file-by-file walkthrough.
 The [README](../README.md) covers *how to run* the project; this document covers *what the pieces
-are*. For *why* they are built this way, see [Design decisions](decisions.md).
+are*, with the short version of *why* below. The full reasoning lives outside this repository — see
+[Where the reasoning lives](#why-it-is-built-this-way).
 
-**The agent architecture is only beginning.** The package holds one real module — `ASASession`,
-which owns a connection to the (virtual) Furhat — plus the machinery that proves packaging,
-tooling and environment work end to end. What follows therefore describes the *structure* the
-remaining agent code will land in as much as the agent itself. See [Roadmap](roadmap.md).
+**The agent hears, decodes and believes.** `uv run asa` hears a line of text, publishes it, decodes
+it into an affect estimate, submits that to the evidence queue, and the affect model folds it into a
+belief that ages on its own. What it does *not* do is act: nothing reads the belief back, so the
+response side — plan, encode, express, embodiment — is not built, and the agent forms an inner state
+that reaches nobody.
 
 Relative links below are written from the repository root.
 
@@ -18,7 +20,7 @@ Relative links below are written from the repository root.
 Three ways in, converging on one function:
 
 ```text
-  uv run asa                  uv run python -m asa          from asa import ASASession
+  uv run asa                  uv run python -m asa          from asa.runtime import run_agent
        │                              │                                 │
        ▼                              ▼                                 │
  .venv/bin/asa                 src/asa/__main__.py                      │
@@ -27,24 +29,98 @@ Three ways in, converging on one function:
        │                              │                                 │
        └──────────────┬───────────────┘                                 │
                       ▼                                                 │
-              src/asa/cli.py                                            │
-              main(argv) -> None                                        │
-              owns the event loop: asyncio.run(...)                     │
+              src/asa/cli.py — the composition root                     │
+              main(argv): args · logging · config · one asyncio.run()   │
+              the only place a concrete adapter is named                │
                       │                                                 │
                       ▼                                                 ▼
-              src/asa/session.py  ◄──── re-exported by ────  src/asa/__init__.py
-              ASASession — async, loop-agnostic            (the public API)
+              src/asa/runtime.py ─────── also awaited directly by ───── notebooks
+              run_agent(source, decoder, state_writer, observers)
+              every long-lived task, and the teardown order
 ```
 
-The notebook path on the right matters more than it looks. `ASASession` never calls
-`asyncio.run()` itself, so the *caller* owns the event loop: `main()` starts one, while a notebook
-already has one running and simply awaits the session. A class that called `asyncio.run()`
-internally would work from the CLI and raise `RuntimeError` in every notebook.
+The notebook path on the right matters more than it looks. Nothing below `cli.py` calls
+`asyncio.run()`, so the *caller* owns the event loop: `main()` starts one, while a notebook already
+has one running and simply awaits `run_agent`. Code that called `asyncio.run()` internally would work
+from the CLI and raise `RuntimeError` in every notebook.
+
+### What runs when the agent runs
+
+`run_agent` starts one consumer task and awaits one producer, inside an `asyncio.TaskGroup`:
+
+```text
+   TextConsole.events()                    an async generator, reading on a worker thread
+        │  Utterance
+        ▼
+   perception/drive.py                      publish the utterance, THEN decode it
+        │  AffectObservation                (that order is what makes a failed decode readable)
+        ▼
+   EvidenceLoop.submit()  ──▶  asyncio.Queue  ──▶  EvidenceLoop.run()
+                                                        │  publish evidence
+                                                        ▼  then fold
+                                                   AffectModel.observe()   ← folds, and ages lazily
+                                                        │
+                                                        ▼  publish the state
+                                                   Observers.publish()
+```
+
+Teardown is not interchangeable: the producer returns at end of input, then `drain()` waits for
+everything submitted to be folded, and only then is the consumer cancelled. Cancelling first would
+discard evidence a participant generated.
 
 The two command-line paths are not redundant. The console script is generated by uv from
 `[project.scripts]` and only exists if the package genuinely built and installed, so running it
 tests the whole packaging chain. `python -m asa` skips all of that and tests only that the
 package imports and its `__main__` shim works.
+
+## Why it is built this way
+
+**The full reasoning lives outside this repository**, in a design document and its decision record —
+Obsidian vault notes, *ASA Design* and *ASA Decisions*, kept there because a design is a claim about
+intent that nothing can check mechanically, whereas this file describes code and two scripts verify
+it. The design version is stamped into every run through `design_version` in
+[`defaults.toml`](../src/asa/core/defaults.toml), currently **v0.6**, so recorded results point back
+at the reasoning behind them and not only at the code. An edited version is intended for publication
+alongside a stable release.
+
+What follows is the short version: the rulings a reader needs before opening any file. Most of the
+rest is in the module docstrings, at the point of use, where it cannot drift away from the code.
+
+- **One process, one queue, one consumer.** Producers submit `AffectEvidence`; a single loop folds
+  and publishes. Rejected: a synchronous call chain, a message bus, a multi-process broker — the
+  first hides ordering, the others buy a decoupling this does not need yet.
+
+- **Four layers, decided by what may import what.** `core/` depends on nothing; subpackages hold
+  ports and strategies plus one `drive.py`; `runtime.py` says what is running; `cli.py` is the only
+  place that names a concrete adapter.
+
+- **Ports are `typing.Protocol` — and the affect model deliberately is not one.** Structural typing
+  means an adapter needs no inheritance and a fake is a class with the right methods. The model owns
+  state and a lifetime rather than being a transform, so nothing declares a protocol for it; the
+  evidence loop reaches it through a `StateWriter` callable alias.
+
+- **Affect is a vector with its representation named.** `AffectVector` carries axis → magnitude plus
+  an identifier saying what those axes mean, and `core/representations.py` declares what each
+  identifier means. Magnitudes are independent intensities rather than a distribution — surprised
+  *and* happy is an ordinary human state.
+
+- **Evidence and belief are different types, so "fold, never overwrite" is enforced rather than
+  remembered.** An estimate cannot be assigned over a belief, because the types do not permit it.
+
+- **The affect model owns no clock.** Every instant arrives as a parameter and decay is evaluated
+  lazily at read time, which is what lets a session be replayed with no clock control at all.
+
+- **Observation is publish-only.** Components announce; observers record and cannot answer back, so
+  a broken recorder cannot change what the agent does. One exception is deliberate: a failing affect
+  model is fatal, because it *is* the control path rather than a bystander.
+
+- **Every record carries a `schema` tag, and a run is reconstructable from its evidence.** The
+  evidence stream plus the run's parameters must be sufficient to recompute the agent's state at any
+  instant — a guarantee with a test rather than a promise.
+
+- **Expression is mapped in two stages** — an encoder to a platform-neutral `ExpressionPlan`, then an
+  embodiment adapter to platform primitives. Not built yet, and it is why `encoding/` and
+  `embodiment/` are separate regions in the layout.
 
 ## Why the imports resolve
 
@@ -77,22 +153,37 @@ asa_research_prototype/
 ├── src/                        # Packaged source — installed into .venv, so `import asa` works anywhere
 │   └── asa/                    #   the importable package (name set by module-name in pyproject.toml)
 │       ├── __init__.py         #     public API: ASASession, FurhatUnreachable, __version__
-│       ├── session.py          #     ASASession — one async interaction session with the Furhat
-│       ├── cli.py              #     main() — what both command-line entry points call
+│       ├── session.py          #     ASASession — one async session with the Furhat (becomes embodiment/furhat.py)
+│       ├── cli.py              #     main() — the composition root; the only place naming an adapter
+│       ├── runtime.py          #     run_agent() — every long-lived task, and the teardown order
 │       ├── __main__.py         #     three-line shim enabling `python -m asa`
+│       ├── core/               #     shared foundations — depended on by everything, depending on nothing
+│       │   ├── affect.py       #       AffectVector, Utterance, AffectEvidence, AffectState, AffectHistory, Target
+│       │   ├── expression.py   #       FacialPrototype/Vector, Facial/VoiceChannel, ExpressionPlan, ExpressionCondition
+│       │   ├── representations.py #    what axis names MEAN — basic4/1, ekman6/1, plutchik8/1, the registry
+│       │   ├── observers.py    #       Event, Observer, Observers — the publish-only registry
+│       │   ├── loops.py        #       EvidenceLoop — the queue it owns, the consumer task, the drain
+│       │   ├── config.py       #       load_config() — packaged defaults layered with an override file
+│       │   └── defaults.toml   #       the shipped defaults, read via importlib.resources
+│       ├── perception/         #     the producer side of the cycle
+│       │   ├── base.py         #       InputSource and AffectDecoder — the two ports
+│       │   ├── text_console.py #       typed input, read on a worker thread so the loop stays free
+│       │   ├── decode_keyword.py #     one algorithm over a table; the built-in tables; restrict()
+│       │   ├── nrc_eil.py       #       the NRC lexicon as tables — a prepared artefact, not shipped
+│       │   └── drive.py        #       the driver: hear, publish, decode, submit
+│       ├── affect_model/       #     the research core — sole writer of state
+│       │   ├── belief.py       #       AffectModel — the per-target table, observe(), state_at(t)
+│       │   ├── folding.py      #       how evidence moves a belief: two knobs, a seam, two policies
+│       │   └── decay.py        #       how a belief ages when nothing arrives — toward rest, not zero
 │       └── _tools/             #     private dev utilities, not part of the public API
 │           ├── custom_logging.py   #       setup_logging() — one stdout handler, app loggers raised
 │           ├── depreport.py        #       dependency table with installed version and release date
+│           ├── paths.py            #       repo_root() — the repository root, found from __file__
 │           └── portcheck.py        #       live Jupyter kernels, port holders, stale-file cleanup
-├── tests/                      # pytest suite
-│   ├── test_cli.py             #   argument parsing, and the clean exit on an unreachable Furhat
-│   ├── test_session.py         #   ASASession against a fake client — no robot, no network
-│   ├── test_furhat_integration.py  # one live round trip; skipped unless a Furhat is serving
-│   └── test_lint.py            #   runs `ruff check` as a test — pytest doubles as the lint gate
+├── tests/                      # pytest suite — one test skips without a robot;
+│                               #   see the table below for what each file covers
 ├── docs/                       # Project documentation
-│   ├── architecture.md         #   this file — entry points, imports, file-by-file walkthrough
-│   ├── decisions.md            #   the numbered design decisions (why it is built this way)
-│   └── roadmap.md              #   what is built, and what is planned
+│   └── architecture.md         #   this file — entry points, imports, file-by-file walkthrough
 ├── notebooks/                  # Exploratory & prototype notebooks (execute from the repo root)
 ├── data_in/                    # Input data — contents gitignored, kept via .gitkeep
 ├── data_results/               # Results data — contents gitignored, kept via .gitkeep
@@ -144,25 +235,180 @@ neither belongs in the vocabulary of code that just wants to talk to a robot.
 a test drive `main()` without argparse picking up the *host* process's arguments, which is
 otherwise unavoidable under pytest.
 
-The work is split three ways on purpose, mirroring how a notebook is used:
+It holds three functions, and the file is deliberately thin:
 
 | Function | Responsibility |
 | -------- | -------------- |
-| `main()` | Arguments, logging, and the one `asyncio.run()` — the only place a loop is created |
-| `run_session()` | Lifecycle: start, then the interaction, then stop in a `finally` |
-| `interaction()` | The script — what the agent actually says and does |
+| `main()` | Arguments, logging, configuration, the observer registry, and the one `asyncio.run()` — the only place a loop is created, the only place a command-line value overrides a configured one, and the only place a concrete adapter is named |
+| `build_parser()` | Argument definitions, separated so a test can inspect them without running anything |
+| `furhat_demo()` | The remaining robot path, behind `--furhat-demo`: connect, gesture, speak, stop in a `finally` |
 
-`interaction()` receives an already-started session rather than creating one, so the same body
-can be pasted into a notebook cell. Keeping the script here rather than on `ASASession` means the
-session class owns the connection and the actions, but never decides on the conversation.
+**`main()` names the adapters and `runtime.py` runs them.** It constructs a `TextConsole`, a
+`KeywordDecoder` and an `AffectModel`, registers whatever observers this run wants, and hands them to
+`run_agent`. The evidence loop is *not* constructed here — it has no alternatives to choose between,
+so requiring every caller to build one would be ceremony rather than composition. The observer
+registry *is* constructed here, for the opposite reason: which observers watch a run is exactly a
+per-run choice.
 
-`run_session()` uses an explicit `try`/`finally` rather than `async with`, which is exactly
-equivalent, because the three phases are the thing worth reading in a composition root. `start()`
-sits *outside* the `try`: a connection that never opened has nothing to close.
+**`--lexicon` chooses which table the decoder runs over, and omitting it keeps the built-in ones**,
+so a plain `uv run asa` decodes as it did before the lexicon existed. That default is deliberate:
+the lexicon is an opt-in second instrument, and the rule-versus-lexicon comparison needs both arms
+available unchanged. A missing or unloadable artefact is treated as an operator problem exactly as
+an unreachable Furhat is — one logged line and exit 1, rather than a traceback through `json`.
+
+This is the one place a research choice is a command-line flag rather than a constant awaiting its
+configuration key. `EKMAN6` and the affect model's parameters are hardcoded here with a comment
+naming the key that will replace them, because they are stable and meaningful in committed code. A
+path to an untracked, dated artefact is neither, so committing one would be committing a fact about
+one machine on one afternoon. The path is also always explicit and never discovered: prepared
+lexicons accumulate by design, so resolving "the newest matching file" would let the same command
+decode differently a week later.
+
+**`furhat_demo()` has a deletion date.** It exists until `session.py` becomes `embodiment/furhat.py`,
+at which point the robot reaches the agent through the `Embodiment` port and this path goes. It
+replaced an earlier `run_session()`/`interaction()` split whose stated justification — that the body
+could be pasted into a notebook cell — had expired, since the notebooks that exist drive the decoder
+and the runtime directly and none of them wants a Furhat session.
+
+`furhat_demo()` uses an explicit `try`/`finally` rather than `async with`, which is exactly
+equivalent, because the phases are the thing worth reading in a composition root. `start()` sits
+*outside* the `try`: a connection that never opened has nothing to close.
 
 It carries no `if __name__ == "__main__":` guard: the console-script wrapper and `__main__.py`
 each own their own entry path, so the guard would only ever fire for `python src/asa/cli.py`,
 which is not a way anyone invokes a packaged project.
+
+### `src/asa/runtime.py` — what runs when the agent runs
+
+`run_agent(source, decoder, state_writer, observers)` starts the actors, runs until input ends, then
+stops them in order. It sits above the subpackages because it may import any of them, and only
+`cli.py` and notebooks import it. **Nothing here constructs an adapter** — that is what lets a
+notebook drive a whole agent with fakes.
+
+Read this file to answer "what is running?". Components not yet built are named in comments where
+they will go, so the gaps are visible rather than implied.
+
+The teardown is three lines and none of them is optional:
+
+```python
+await run_perception(source, decoder, evidence_loop.submit, observers)   # producers stop at EOF
+await evidence_loop.drain()                                             # then finish the backlog
+consumer.cancel()                                                       # only then stop consuming
+```
+
+The `TaskGroup` is what makes the fatal path work. `EvidenceLoop.run` raises when the affect model
+fails, which cancels this body wherever it has got to — so the drain is never reached on that path,
+and the rule "never drain after a fatal fold" is structural rather than remembered. On the normal
+path, cancelling a child from inside the body lets no `CancelledError` escape the group, so no
+suppression is needed. Both were verified rather than assumed.
+
+### `src/asa/core/` — the foundations
+
+Membership test: *depended on by everything, depending on nothing*. Every module here imports only the
+standard library and its siblings.
+
+| Module | Holds |
+| ------ | ----- |
+| [`affect.py`](../src/asa/core/affect.py) | The affect records — `AffectVector`, `Utterance`, `AffectEvidence` (aliased `AffectObservation`), `AffectState`, `AffectHistory`, `Target`, and the shared `utc_now`/`new_id`/`_require_aware` helpers |
+| [`expression.py`](../src/asa/core/expression.py) | The expression records — `FacialPrototype`, `FacialVector`, `FacialChannel`, `VoiceChannel`, `ExpressionPlan`, `ExpressionCondition` |
+| [`representations.py`](../src/asa/core/representations.py) | What axis names *mean*: `AffectRepresentation`, the `FourEmotions`/`SixEmotions`/`EightEmotions` vocabularies, `BASIC4`, `EKMAN6`, `PLUTCHIK8` and the `REPRESENTATIONS` registry. `plutchik8/1` is the NRC lexicon's own basis and is **diagnostic rather than scoreable** — the benchmark frame has no `anticipation` or `trust` column, so what it answers is how often a signal lands where Ekman's six cannot reach |
+| [`observers.py`](../src/asa/core/observers.py) | `Event` (a structural protocol), the `Observer` callable alias, and `Observers` — publish-only, synchronous, exceptions contained |
+| [`loops.py`](../src/asa/core/loops.py) | `EvidenceLoop`, which owns its queue, and the `StateWriter` alias the affect model satisfies |
+| [`config.py`](../src/asa/core/config.py) | `load_config()` — packaged defaults, then an override file; unknown keys raise |
+
+Every record type is a frozen dataclass carrying `at` and `schema`, which is the invariant `Event`
+names. `_require_aware` is imported across modules despite its leading underscore: one underscore
+means *not the package's public API*, and both modules are inside `core/`.
+
+### `src/asa/perception/` — hearing, and interpreting
+
+Two ports in [`base.py`](../src/asa/perception/base.py), because producing an utterance and
+interpreting one are two different framework elements:
+
+| Port | Method | Implementations |
+| ---- | ------ | --------------- |
+| `InputSource` | `events() -> AsyncIterator[Utterance]` | `TextConsole` today; speech and generated sources planned |
+| `AffectDecoder` | `async decode(utterance) -> AffectObservation` | `KeywordDecoder` today; an LLM decoder planned |
+
+Both are structural protocols: an implementation satisfies one by having the method, never by
+inheriting, so a fake in a test is a class with that method and nothing else.
+
+[`text_console.py`](../src/asa/perception/text_console.py) reads through
+`asyncio.to_thread(self._read, self._prompt)`, which is what keeps a blocking `input()` off the event
+loop. The reader is injected rather than patched, so a notebook can supply its own end-of-input
+sentinel — no notebook frontend can send a real EOF.
+
+[`decode_keyword.py`](../src/asa/perception/decode_keyword.py) holds one matching algorithm, the
+built-in tables, and a `KeywordDecoder` constructed with a representation, a table **and the name of
+the lexicon that table came from**. It validates its table against its representation once at
+construction rather than per call, fills every axis (at rest where nothing fired), combines several
+matches per axis with `max`, and writes the words that fired into `rationale` as `axis=word` pairs.
+`confidence` is left `None` — a keyword matched or it did not.
+
+The lexicon name is required and reaches every record as `decoder:rule:<lexicon>`. One algorithm over
+two tables is **two instruments**, so without it a built-in run and a lexicon run would write
+identical `source` strings over the same representation and be indistinguishable in the evidence —
+which is the comparison the second table exists to make.
+
+The same module holds `restrict(table, source, target)`, which derives a table for a coarser
+representation whose axes the finer one already declares. The check is
+`set(target.axes) - set(source.axes)`, so `plutchik8/1` → `ekman6/1` passes (dropping `anticipation`
+and `trust`) while `plutchik8/1` → `basic4/1` raises on its merged axes. **Selection is allowed,
+merging is not**, and no representation is named in the check.
+
+[`nrc_eil.py`](../src/asa/perception/nrc_eil.py) turns the NRC Emotion Intensity Lexicon into tables
+of that same shape. The lexicon may be used for research but **not redistributed**, so it is not
+shipped beside the module that reads it: `notebooks/lexicons.ipynb` converts the published TSV into
+a JSON artefact under the gitignored `data_in/`, and `load_tables(path, wanted)` reads that. The
+artefact is **format only** — no mapping, no renaming, no thresholding — so every decision that
+changes what the decoder believes stays in this module, and regenerating the file is a no-op. Two
+guards refuse a file whose emotions do not match the mapping in either direction, which is what
+catches loading the older four-emotion lexicon by mistake.
+
+[`drive.py`](../src/asa/perception/drive.py) is the driver: nine lines of code under a much longer
+docstring. It publishes the utterance *before* decoding it, so a failed decode still leaves the
+utterance in the record, and it takes a bound `submit` method rather than the evidence loop, so it
+cannot reach `drain()`.
+
+### `src/asa/affect_model/` — the research core
+
+Three modules: the model, and the two strategies it calls. The model is **not a port** — it owns
+state and a lifetime rather than being a transform, so nothing declares a protocol for it and the
+evidence loop reaches it through the `StateWriter` callable alias. That is also why it is named
+`belief.py` rather than `model.py`: there is no strategy to name, so the module is named for what it
+holds.
+
+[`belief.py`](../src/asa/affect_model/belief.py) holds `AffectModel` — the sole author of
+`AffectState`. It owns **no clock**: every instant arrives as a parameter, and decay is evaluated
+lazily at read time, so nothing runs on a schedule for a belief to be correctly aged when someone
+asks. Two entry points:
+
+| Method | Does |
+| --- | --- |
+| `observe(evidence)` | age the target's belief to the evidence's instant, ask that target's policy, fold, store, and return the state it produced. **Synchronous**, which the evidence loop's atomicity depends on |
+| `state_at(t)` | the belief at `t` — a pure function of the evidence folded so far. Answers *now or later, never earlier*: a query into the past raises rather than guessing, because the past is recovered by replaying the evidence |
+
+Everything is **per target**, and the differences are enforced rather than remembered. Each target
+maps to its own fold policy, and each carries two instants: `valid_at`, which moves on every fold and
+is what `state_at` ages from, and `fresh_since`, which moves only when a policy renews the belief's
+*currency*. `EXPRESSED` neither decays nor can be configured to — `half_lives` refuses a key for it
+by name, and `state_at` never calls `decayed()` on it.
+
+[`folding.py`](../src/asa/affect_model/folding.py) is how evidence moves a belief. `folded()` is the
+arithmetic; `FoldDecision` carries the two knobs (`weight` and `refresh`); `FoldPolicy` is the
+`Protocol` pinning what a policy is handed — the evidence *entire*, the current belief, and the time
+since the belief was last renewed. Two policies ship: `ConfidenceWeighted`, which cannot be
+constructed to treat an unstated confidence as certainty, and `Assign`, for evidence that is a fact
+rather than an estimate. The policies know nothing about targets; `belief.py` owns that table.
+
+[`decay.py`](../src/asa/affect_model/decay.py) is how a belief ages when nothing arrives: one
+exponential per axis, toward the **representation's `rest`** rather than toward zero, with time as a
+parameter. It takes a whole vector rather than a magnitude, so no caller can hold the axis loop and
+mutate a snapshot in place, and it is handed the representation rather than a bare `rest` float so it
+can reject a vector aged against the wrong one.
+
+Nothing reads the belief back yet. `state_at` has no caller outside the tests until the intention
+planner arrives, which is what makes the current agent one that believes without acting.
 
 ### `src/asa/_tools/` — private development utilities
 
@@ -171,6 +417,16 @@ cannot reach them. They ride along in the wheel, which costs nothing at import t
 importable from a notebook with no `sys.path` juggling. `custom_logging.setup_logging()` installs
 a single stdout handler and raises the level on the `asa` and `__main__` logger trees, leaving
 third-party libraries at the root `WARNING`.
+
+`paths.repo_root()` answers *where is the repository* for a notebook that does not know where it
+was started — walking up from `__file__` rather than `Path.cwd()`, and stopping at `uv.lock`
+because a workspace has exactly one lock file where it may have several `pyproject.toml`. It
+raises rather than guessing, so an `asa` installed non-editable fails where the problem is instead
+of returning a plausible wrong root. **The library must never import it**: `nrc_eil.load_tables`
+deliberately refuses a default path on the grounds that where a file lives is a composition root's
+decision, and a `repo_root()` reachable from `asa.perception` would hand every module a way to
+undo that quietly. A notebook *is* a composition root and may use it; `core`, `perception` and
+`affect_model` may not.
 
 ### `src/asa/__main__.py` — the `-m` shim
 
@@ -186,7 +442,21 @@ returns `None` and both exit 0; the point is that the two entry paths cannot div
 
 | Test file | Covers |
 | --------- | ------ |
-| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that an unreachable Furhat exits 1 rather than raising; and that `run_session` stops the session when the interaction fails but not when the start does |
+| [`test_affect.py`](../tests/test_affect.py) | The guards and the properties other components depend on: naive datetimes rejected, `AffectHistory`'s list→tuple coercion, sequence immutability, the empty window a cold start hits, and that `asdict()` leaves datetimes unserialised |
+| [`test_expression.py`](../tests/test_expression.py) | The expression records, with the facial vocabulary pinned **whole** — `BIG_SMILE` and `NEUTRAL` were removed for reasons invisible at the point someone would re-add one |
+| [`test_representations.py`](../tests/test_representations.py) | Declaration guards (no axes, duplicate axis, inverted range, rest outside it), the tuple coercion, that no property has a default, and all three axis vocabularies pinned whole **and in order** — order is the column order of every record, so a reorder makes two pilots incomparable while every `schema` tag still matches. Also that `ekman6/1` is a strict subset of `plutchik8/1`, the fact the derived tables depend on |
+| [`test_observers.py`](../tests/test_observers.py) | A raising observer is logged and dropped, the other observers still run, and the failure handler never reads the event |
+| [`test_loops.py`](../tests/test_loops.py) | One fold publishes exactly one evidence row then one state row *in that order*; `drain()` returns only once everything submitted is folded; a failing `StateWriter` raises out of `run` rather than being absorbed, and the failed item is still acknowledged so the failure cannot become a hang |
+| [`test_perception.py`](../tests/test_perception.py) | That reading does not freeze the event loop — asserted by advancing a counter task concurrently — and the driver's publish-then-decode ordering, pinned from both sides. Then `restrict`'s four cases (subset, identity, a refused merge, a refused widening) and that a derived table does not alias its parent; and that two decoders over one representation with different lexicons write **different** `source` values, which nothing else asserts |
+| [`test_nrc_eil.py`](../tests/test_nrc_eil.py) | The loader, against an artefact built in `tmp_path` so **no download is needed and CI covers it**: `joy` mapping to `happiness`, one table per requested representation, a refused `basic4/1`, `source` read from the file rather than assumed, a `floor` that both drops entries and reaches the name, and the two guards for a file whose emotions do not match the mapping in either direction |
+| [`test_decay.py`](../tests/test_decay.py) | The property the module exists to have — one half-life halves the distance to **rest**, checked against a representation whose rest is not zero, since heading for zero and heading for rest agree only when they coincide. Plus composability, which reconstruction depends on, and the three guards |
+| [`test_folding.py`](../tests/test_folding.py) | The fold arithmetic at both ends of the weight and in between; that both inputs survive untouched; the representation, completeness and range guards; and the one claim here that is not a matter of taste — an unstated `confidence` weighs less than a stated certainty, and a policy cannot be built to say otherwise |
+| [`test_belief.py`](../tests/test_belief.py) | A belief exists before any evidence and is at **rest** rather than zero — the only test in the suite that can tell those apart. Then the two markers coming apart under hesitant evidence, per-target policy, `EXPRESSED` neither ageing nor configurable to, and the refusal to answer about the past |
+| [`test_reconstruction.py`](../tests/test_reconstruction.py) | The guarantee that a run is recomputable from its evidence, rebuilt from what the observer registry **published** rather than from what the test submitted — so it fails if the record ever stops being sufficient. Two tests then vary one recorded parameter each and require the rebuild to diverge, since a reconstruction that cannot fail proves nothing. Wrapped in `asyncio.wait_for` for the same reason as `test_runtime.py` |
+| [`test_runtime.py`](../tests/test_runtime.py) | The teardown from the outside: everything submitted is folded before `run_agent` returns, the agent returns at all when input ends, one input produces utterance→evidence→state across three publishers, and a failing model ends the session rather than hanging. Wrapped in `asyncio.wait_for`, unlike every other test file, because the characteristic failure here is a hang |
+| [`test_types.py`](../tests/test_types.py) | Runs `pyright` over `src` **and** `tests`. Ruff does not type-check, so without this the whole class of error is editor-only |
+| [`test_cli.py`](../tests/test_cli.py) | Argument parsing (defaults, explicit values, a rejected `--log`); that `--host` falls back to configuration when absent and beats it when given; that an unreachable Furhat exits 1 rather than raising; that the demo path stops the session even when the interaction fails but not when the start does; and that the **default path composes the agent and never touches the robot**. Then `--lexicon`: omitted keeps the built-in tables, given swaps both the table and the recorded source name, and a missing or unloadable artefact exits 1 with a message. Those last two assert on `capsys` rather than `caplog`, because `setup_logging` calls `basicConfig(force=True)`, which clears pytest's capturing handler |
+| [`test_config.py`](../tests/test_config.py) | The two-layer load — packaged defaults resolve, a partial override leaves other keys alone, an unknown key or section raises, a missing file names its path. Reading the defaults through `importlib.resources` also proves the TOML is reachable from the installed package |
 | [`test_session.py`](../tests/test_session.py) | `ASASession` against a fake client — the hand-built gesture event asks for monitoring, both connect failures map to `FurhatUnreachable`, `stop()` is idempotent, handlers are registered, the library's stderr handler is stripped |
 | [`test_furhat_integration.py`](../tests/test_furhat_integration.py) | One end-to-end round trip against a live robot. Skipped automatically when nothing is serving on port 9000 |
 | [`test_lint.py`](../tests/test_lint.py) | Runs `ruff check .` across the repo as a test, so `uv run pytest` doubles as the lint gate |

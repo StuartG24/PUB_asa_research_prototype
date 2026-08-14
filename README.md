@@ -13,9 +13,12 @@
 
 As a first step in investigating empathic social robots, a research prototype (`asa-research-prototype`) will be used to examine and refine a proposed framework for social interaction and to explore candidate technology solutions and evaluation approaches. The technology basis for the prototype will be the incremental building of an Artificial Social Agent.
 
-**The agent is at an early stage.** The package contains `ASASession`, which opens and owns a
-connection to a (virtual) Furhat robot, alongside a test suite that proves the packaging, tooling
-and environment all work end to end. See [Roadmap](docs/roadmap.md) for what is planned.
+**The agent hears, decodes and believes — it does not yet act.** `uv run asa` reads a line of text,
+decodes it into an affect estimate, and folds that into a belief that ages on its own with no clock
+driving it. The response side — planning, encoding, expression and the robot — is not built, so the
+agent currently forms an inner state that reaches nobody. `ASASession` opens and owns a connection to
+a (virtual) Furhat and is exercised separately, via `--furhat-demo`, until it becomes the embodiment
+adapter.
 
 It is a **packaged** project — it has a `[build-system]`, so `uv sync` builds and installs it
 into the local `.venv`. That is what makes `import asa` resolve everywhere (tests, notebooks,
@@ -42,9 +45,16 @@ directory from the project name.
 | Document | Covers |
 | -------- | ------ |
 | This README | What the project is, how to install it, how to run it |
-| [Architecture](docs/architecture.md) | How the pieces fit together, plus a file-by-file walkthrough |
-| [Design decisions](docs/decisions.md) | Why it is built this way — numbered, append-only |
-| [Roadmap](docs/roadmap.md) | What is built, and the planned extensions |
+| [Architecture](docs/architecture.md) | How the pieces fit, a file-by-file walkthrough, and the short version of *why* |
+
+**The design document, the decision record and the build plan are kept outside this repository**, in
+the research notes this prototype is built from. That is deliberate: this file and the architecture
+notes describe code and can be checked against it, whereas a design is a statement of intent that
+nothing can verify mechanically — so keeping them together invites one to drift from the other. The
+design version in force is stamped into every run through `design_version` in
+[`src/asa/core/defaults.toml`](src/asa/core/defaults.toml), and an edited version is intended for
+publication alongside a stable release. Most of the reasoning that matters while reading the code is
+in the module docstrings, at the point of use.
 
 ---
 
@@ -53,13 +63,17 @@ directory from the project name.
 ```text
 asa_research_prototype/
 ├── src/asa/            # The importable package
+│   ├── cli.py          # main() — the `asa` console command, and the composition root
+│   ├── runtime.py      # run_agent() — every long-lived task, and the teardown order
 │   ├── session.py      # ASASession — one async interaction session with the Furhat
-│   ├── cli.py          # main() — the `asa` console command
 │   ├── __main__.py     # enables `python -m asa`
-│   └── _tools/         # private dev utilities (logging, dependency report, port check)
+│   ├── core/           # shared foundations — record types, representations, config, the queue
+│   ├── perception/     # the producer side — input adapters and decoding
+│   ├── affect_model/   # the research core — belief, folding, decay
+│   └── _tools/         # private dev utilities (logging, dependency report, port check, repo paths)
 ├── notebooks/          # Exploratory & prototype notebooks
 ├── tests/              # pytest suite
-├── docs/               # Architecture notes, design decisions and roadmap
+├── docs/               # Architecture notes
 ├── data_in/            # Input data — contents gitignored, kept via .gitkeep
 ├── data_results/       # Results data — contents gitignored, kept via .gitkeep
 └── pyproject.toml      # Metadata, dependencies, tool config (ruff, autopep8, pytest)
@@ -67,21 +81,33 @@ asa_research_prototype/
 
 ---
 
-## Prerequisites
-
-- **Python 3.12** — provisioned automatically by uv (see `.python-version`); no manual install needed.
-- **[uv](https://docs.astral.sh/uv/)** — the package & environment manager:
-
-  ```bash
-  # macOS / Linux
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  # or with Homebrew
-  brew install uv
-  ```
-
----
-
 ## Getting started
+
+Two installations, and **only the second is required**. `uv run asa` runs the agent and never
+touches a robot; the Furhat SDK is needed for `--furhat-demo` and the integration test alone.
+
+### 1. Furhat installation
+
+The prototype talks to a **virtual** Furhat (the simulator that ships with the Furhat SDK) so no
+hardware is involved. Follow the instructions at [docs.furhat.io/setup/sdk](https://docs.furhat.io/setup/sdk) to create an SDK account, download the Furhat launcher and install it. That page also covers the API key that activates the SDK.
+
+None of it reaches this repository. **Nothing from that page belongs in `.env`**: the prototype reads no environment variables. And the Python client `furhat-realtime-api` is a dependency of *this project*, arriving with `uv sync` rather than as part of the SDK download.
+
+Further reference: [Developer Zone](https://furhat.io) ·
+[documentation](https://docs.furhat.io) · [downloads](https://furhat.io/downloads)
+
+### 2. uv & ASA prototype installation
+
+Install [uv](https://docs.astral.sh/uv/), the package and environment manager.
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or with Homebrew
+brew install uv
+```
+
+Clone the ASA Prototype and create the uv environment.
 
 ```bash
 # 1. Clone
@@ -92,12 +118,14 @@ cd asa_research_prototype
 uv sync
 ```
 
-uv reads `.python-version`, provisions Python 3.12 (downloading it if necessary), creates a
-local `.venv/`, installs the locked dependencies, and installs this project itself in **editable**
-mode — so edits to `src/asa/` take effect immediately, with no re-sync.
+A single `uv sync` completes the following:
 
-One `uv sync` is enough: the `dev` group includes the `notebook` group, so test, lint and
-notebook tooling all arrive together. CI that wants none of it can use `--no-default-groups`.
+- Reads `.python-version` and provisions **Python 3.12**  (downloading it if necessary)
+- Creates a local `.venv/`
+- Installs the locked dependencies
+- Installs this project itself in **editable** mode so edits to `src/asa/` take effect immediately, with no re-sync.
+
+Note that the `dev` group includes the `notebook` group, so test, lint and notebook tooling all arrive together. CI that wants none of it can use `--no-default-groups`.
 
 You don't need to activate the venv — prefix commands with `uv run` and they execute inside the
 project environment.
@@ -106,21 +134,60 @@ project environment.
 
 ## Usage
 
+### 1. Furhat
+
+Start the launcher to bring up **Furhat Studio** — the virtual Furhat, plus a web interface for
+driving it by hand. The Remote API then serves on port 9000:
+
+| | |
+| --- | --- |
+| Websocket | `ws://<ROBOT_IP>:9000/v1/events` — locally `ws://127.0.0.1:9000/v1/events` |
+| Playground | `http://127.0.0.1:9000/v1/index.html` — exercise the virtual Furhat from a browser |
+
+```bash
+uv run asa --furhat-demo # connect to a Furhat, gesture, speak, disconnect
+```
+
+That is the one path that needs a robot. **The launcher must be running** — with nothing serving on
+port 9000 it reports a single line and exits 1 rather than raising. It exists to exercise the
+connection outside the test suite, and it will be deleted once `session.py` becomes the embodiment
+adapter.
+
+### 2. ASA prototype
+
 ```bash
 uv run asa               # the `asa` console script
-uv run python -m asa     # the module entry point (same output)
+uv run python -m asa     # the module entry point (same behaviour)
+uv run asa --log info    # quieter — the session rather than the internals
 ```
 
-Both print `Hello, World!`. They prove different things, which is why both exist: the console
-script exercises the whole packaging path (`[project.scripts]` → installed entry point), while
-`python -m asa` bypasses that and tests only that the package imports and its `__main__` shim
-works. If packaging broke, the first would fail and the second would still pass.
+Both entry points run **the agent**, and neither needs a robot. Type a line and it is decoded into
+an affect estimate and folded into the agent's belief; an empty line ends the session, which exits 0.
+Nothing is expressed yet, so the visible output is the log.
 
-**Work in notebooks:**
+The two entry points prove different things, which is why both exist: the console script exercises
+the whole packaging path (`[project.scripts]` → installed entry point), while `python -m asa`
+bypasses that and tests only that the package imports and its `__main__` shim works. If packaging
+broke, the first would fail and the second would still pass.
 
-```bash
-uv run jupyter lab
-```
+| Option | Effect |
+| ------ | ------ |
+| `--host ADDRESS` | Furhat address. Default comes from configuration — `127.0.0.1`, the virtual Furhat |
+| `--config FILE` | TOML file overriding selected configuration keys (see [Configuration](#configuration)) |
+| `--lexicon FILE` | Prepared lexicon artefact for the decoder. Default: the built-in hand-written tables |
+| `--log {debug,info,warning}` | Log verbosity (default `debug`) |
+| `--furhat-demo` | Run the smile-and-speak connection check **instead of** the agent. Needs a Furhat |
+
+### 3. Notebook analyses
+
+Several Jupyter Notebooks are included for analyses and development.
+
+| Notebook | Covers |
+| -------- | ------ |
+| `data_load_benchmarks.ipynb` | Labelled corpora reshaped into one standard benchmark frame carrying provenance |
+| `data_load_lexicons.ipynb` | NRC-EIL prepared into the JSON artefact that `--lexicon` reads |
+| `evaluation_decoders.ipynb` | Decoder conditions scored against the benchmarks, with a threshold sweep and error analysis |
+| `evaluation_runs.ipynb` | Benchmark text replayed through the live agent as an input stream |
 
 Notebooks in `notebooks/` execute from the repo root (set in `.vscode/settings.json`), so
 relative paths like `data_in/…` resolve. `import asa` works from anywhere regardless, because
@@ -169,14 +236,28 @@ uv remove <package>
 
 ## Configuration
 
-Secrets and environment-specific settings are read from a local `.env` file (gitignored):
+Two separate things, deliberately kept apart.
+
+**Settings** — TOML, in three layers, each winning over the one before:
+
+1. [`src/asa/core/defaults.toml`](src/asa/core/defaults.toml), shipped inside the package so it
+   resolves by module location rather than working directory;
+2. an override file — `uv run asa --config pilots/pilot-2.toml` — which need only carry the keys
+   it changes;
+3. command-line arguments, applied in `main()` alone.
+
+An unknown key or section in an override file is an **error**, not a warning. A mistyped key would
+otherwise leave the default silently in place while your notes record the value you meant to set —
+the sort of thing that invalidates a run without anybody noticing.
+
+**Secrets and environment-specific values** — a local `.env` file (gitignored):
 
 ```bash
 cp .env.example .env
 ```
 
-Nothing is required yet — the scaffold reads no environment variables. See
-[`.env.example`](.env.example) for the conventions to follow as the prototype grows.
+Nothing is required yet: no environment variables are read. See [`.env.example`](.env.example) for
+the conventions to follow as the prototype grows.
 
 ---
 
@@ -190,12 +271,13 @@ uv run pytest              # run everything
 uv run pytest -vv -rA -l   # verbose: full summary, plus local variables on failure
 ```
 
-| Test file | Covers |
-| --------- | ------ |
-| [`tests/test_cli.py`](tests/test_cli.py) | argument parsing, and that an unreachable Furhat exits 1 instead of raising |
-| [`tests/test_session.py`](tests/test_session.py) | `ASASession` against a fake client — actions, lifecycle and error mapping, with no robot and no network |
-| [`tests/test_furhat_integration.py`](tests/test_furhat_integration.py) | one live round trip — connect, gesture, speak, disconnect. **Skipped** unless a Furhat is serving on port 9000 |
-| [`tests/test_lint.py`](tests/test_lint.py) | runs `ruff check` across the repo as a test, so `uv run pytest` is also the lint gate |
+**What each file covers is tabulated in [Architecture](docs/architecture.md#tests--the-pytest-suite)**
+rather than here, so the list has one home and cannot drift between two. In outline, the suite covers
+the record types and their guards, the observer registry, the evidence queue and its teardown,
+perception, the affect model and the guarantee that a run can be rebuilt from its evidence, the CLI
+and configuration, and the Furhat session against a fake client. Two tests are gates rather than
+subjects: `test_lint.py` runs `ruff check` and `test_types.py` runs `pyright`, so `uv run pytest` is
+also the lint and type-check gate.
 
 Everything except the integration test runs in milliseconds and needs nothing installed or
 running. The integration test skips itself when nothing answers on port 9000, so the suite stays
