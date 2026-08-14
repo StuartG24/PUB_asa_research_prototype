@@ -14,6 +14,7 @@ which under pytest raises, from somewhere that explains nothing.
 """
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 
@@ -24,7 +25,7 @@ from asa.core.affect import AffectObservation, Utterance, utc_now
 from asa.core.observers import Observers
 from asa.perception.decode_keyword import KeywordDecoder
 from asa.perception.text_console import TextConsole
-from asa.session import FurhatUnreachable
+from asa.session import ASASession, FurhatUnreachable
 
 
 async def _unreachable_run_agent(**kwargs: object) -> None:
@@ -44,6 +45,14 @@ def _fake_session(events: list[str], *,
     Stubbed rather than pointed at a dead address. A test that relied on nothing listening
     would quietly invert its meaning the day a Furhat *is* running locally — and would then
     connect and make the robot speak.
+
+    ``gesture`` mirrors ``ASASession.gesture`` parameter for parameter rather than absorbing
+    the extras into ``**kwargs``. A ``**kwargs`` double is wrong in *both* directions at once:
+    it has no positional slots, so it refuses a call the real class accepts — which is what
+    broke here, when the demo's gesture chain began passing ``intensity`` and ``duration``
+    positionally — and it accepts any keyword at all, so a misspelling the robot would reject
+    sails through and the test still passes. Mirroring buys agreement on every call shape; the
+    parameter values are unused.
     """
     class FakeSession:
         def __init__(self, host: str, **kwargs: object) -> None:
@@ -54,7 +63,9 @@ def _fake_session(events: list[str], *,
             if start_error is not None:
                 raise start_error
 
-        async def gesture(self, name: str, **kwargs: object) -> None:
+        async def gesture(self, name: str,
+                          intensity: float = 1.0, duration: float = 1.0, *,
+                          wait: bool = False) -> None:
             events.append("gesture")
             if gesture_error is not None:
                 raise gesture_error
@@ -66,6 +77,18 @@ def _fake_session(events: list[str], *,
             events.append("stop")
 
     return FakeSession
+
+
+def test_the_fake_session_mirrors_the_real_gesture_signature():
+    """The double is hand-written, so only this stops it drifting from the class it doubles.
+
+    ``inspect.signature`` equality rather than a call, because the property under test is
+    the *shape* of the parameter list — which call shapes are accepted — and a call would
+    only ever exercise the one shape it happened to use. This is the check that failed
+    silently before: nothing tied the two together, so the demo could change how it calls
+    ``gesture`` and only a ``TypeError`` at run time said so.
+    """
+    assert inspect.signature(_fake_session([]).gesture) == inspect.signature(ASASession.gesture)
 
 
 def test_defaults():
