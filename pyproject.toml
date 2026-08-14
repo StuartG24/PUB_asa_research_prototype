@@ -6,7 +6,7 @@
 #
 [project]
 name = "asa-research-prototype"
-version = "0.3.0.dev0"
+version = "0.3.0"
 description = "Research prototype for a basic Artificial Social Agent — uv-managed, packaged."
 readme = "README.md"
 license = "Apache-2.0"

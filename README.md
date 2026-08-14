@@ -70,7 +70,7 @@ asa_research_prototype/
 │   ├── core/           # shared foundations — record types, representations, config, the queue
 │   ├── perception/     # the producer side — input adapters and decoding
 │   ├── affect_model/   # the research core — belief, folding, decay
-│   └── _tools/         # private dev utilities (logging, dependency report, port check)
+│   └── _tools/         # private dev utilities (logging, dependency report, port check, repo paths)
 ├── notebooks/          # Exploratory & prototype notebooks
 ├── tests/              # pytest suite
 ├── docs/               # Architecture notes
@@ -81,21 +81,33 @@ asa_research_prototype/
 
 ---
 
-## Prerequisites
-
-- **Python 3.12** — provisioned automatically by uv (see `.python-version`); no manual install needed.
-- **[uv](https://docs.astral.sh/uv/)** — the package & environment manager:
-
-  ```bash
-  # macOS / Linux
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  # or with Homebrew
-  brew install uv
-  ```
-
----
-
 ## Getting started
+
+Two installations, and **only the second is required**. `uv run asa` runs the agent and never
+touches a robot; the Furhat SDK is needed for `--furhat-demo` and the integration test alone.
+
+### 1. Furhat installation
+
+The prototype talks to a **virtual** Furhat (the simulator that ships with the Furhat SDK) so no
+hardware is involved. Follow the instructions at [docs.furhat.io/setup/sdk](https://docs.furhat.io/setup/sdk) to create an SDK account, download the Furhat launcher and install it. That page also covers the API key that activates the SDK.
+
+None of it reaches this repository. **Nothing from that page belongs in `.env`**: the prototype reads no environment variables. And the Python client `furhat-realtime-api` is a dependency of *this project*, arriving with `uv sync` rather than as part of the SDK download.
+
+Further reference: [Developer Zone](https://furhat.io) ·
+[documentation](https://docs.furhat.io) · [downloads](https://furhat.io/downloads)
+
+### 2. uv & ASA prototype installation
+
+Install [uv](https://docs.astral.sh/uv/), the package and environment manager.
+
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# or with Homebrew
+brew install uv
+```
+
+Clone the ASA Prototype and create the uv environment.
 
 ```bash
 # 1. Clone
@@ -106,12 +118,14 @@ cd asa_research_prototype
 uv sync
 ```
 
-uv reads `.python-version`, provisions Python 3.12 (downloading it if necessary), creates a
-local `.venv/`, installs the locked dependencies, and installs this project itself in **editable**
-mode — so edits to `src/asa/` take effect immediately, with no re-sync.
+A single `uv sync` completes the following:
 
-One `uv sync` is enough: the `dev` group includes the `notebook` group, so test, lint and
-notebook tooling all arrive together. CI that wants none of it can use `--no-default-groups`.
+- Reads `.python-version` and provisions **Python 3.12**  (downloading it if necessary)
+- Creates a local `.venv/`
+- Installs the locked dependencies
+- Installs this project itself in **editable** mode so edits to `src/asa/` take effect immediately, with no re-sync.
+
+Note that the `dev` group includes the `notebook` group, so test, lint and notebook tooling all arrive together. CI that wants none of it can use `--no-default-groups`.
 
 You don't need to activate the venv — prefix commands with `uv run` and they execute inside the
 project environment.
@@ -120,23 +134,36 @@ project environment.
 
 ## Usage
 
+### 1. Furhat
+
+Start the launcher to bring up **Furhat Studio** — the virtual Furhat, plus a web interface for
+driving it by hand. The Remote API then serves on port 9000:
+
+| | |
+| --- | --- |
+| Websocket | `ws://<ROBOT_IP>:9000/v1/events` — locally `ws://127.0.0.1:9000/v1/events` |
+| Playground | `http://127.0.0.1:9000/v1/index.html` — exercise the virtual Furhat from a browser |
+
+```bash
+uv run asa --furhat-demo # connect to a Furhat, gesture, speak, disconnect
+```
+
+That is the one path that needs a robot. **The launcher must be running** — with nothing serving on
+port 9000 it reports a single line and exits 1 rather than raising. It exists to exercise the
+connection outside the test suite, and it will be deleted once `session.py` becomes the embodiment
+adapter.
+
+### 2. ASA prototype
+
 ```bash
 uv run asa               # the `asa` console script
 uv run python -m asa     # the module entry point (same behaviour)
+uv run asa --log info    # quieter — the session rather than the internals
 ```
 
-Both run **the agent**, and neither needs a robot. Type a line and it is decoded into an affect
-estimate and folded into the agent's belief; an empty line ends the session, which exits 0. Nothing
-is expressed yet, so the visible output is the log.
-
-```bash
-uv run asa --furhat-demo # instead: connect to a Furhat, gesture, speak, disconnect
-```
-
-That is the one path that needs a robot. **The Furhat launcher must be running** — with nothing
-serving on port 9000 it reports a single line and exits 1 rather than raising. It exists to exercise
-the connection outside the test suite, and it will be deleted once `session.py` becomes the
-embodiment adapter.
+Both entry points run **the agent**, and neither needs a robot. Type a line and it is decoded into
+an affect estimate and folded into the agent's belief; an empty line ends the session, which exits 0.
+Nothing is expressed yet, so the visible output is the log.
 
 The two entry points prove different things, which is why both exist: the console script exercises
 the whole packaging path (`[project.scripts]` → installed entry point), while `python -m asa`
@@ -147,14 +174,20 @@ broke, the first would fail and the second would still pass.
 | ------ | ------ |
 | `--host ADDRESS` | Furhat address. Default comes from configuration — `127.0.0.1`, the virtual Furhat |
 | `--config FILE` | TOML file overriding selected configuration keys (see [Configuration](#configuration)) |
+| `--lexicon FILE` | Prepared lexicon artefact for the decoder. Default: the built-in hand-written tables |
 | `--log {debug,info,warning}` | Log verbosity (default `debug`) |
 | `--furhat-demo` | Run the smile-and-speak connection check **instead of** the agent. Needs a Furhat |
 
-**Work in notebooks:**
+### 3. Notebook analyses
 
-```bash
-uv run jupyter lab
-```
+Several Jupyter Notebooks are included for analyses and development.
+
+| Notebook | Covers |
+| -------- | ------ |
+| `data_load_benchmarks.ipynb` | Labelled corpora reshaped into one standard benchmark frame carrying provenance |
+| `data_load_lexicons.ipynb` | NRC-EIL prepared into the JSON artefact that `--lexicon` reads |
+| `evaluation_decoders.ipynb` | Decoder conditions scored against the benchmarks, with a threshold sweep and error analysis |
+| `evaluation_runs.ipynb` | Benchmark text replayed through the live agent as an input stream |
 
 Notebooks in `notebooks/` execute from the repo root (set in `.vscode/settings.json`), so
 relative paths like `data_in/…` resolve. `import asa` works from anywhere regardless, because

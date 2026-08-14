@@ -135,7 +135,7 @@ wheels = [
 
 [[package]]
 name = "asa-research-prototype"
-version = "0.3.0.dev0"
+version = "0.3.0"
 source = { editable = "." }
 dependencies = [
     { name = "furhat-realtime-api" },

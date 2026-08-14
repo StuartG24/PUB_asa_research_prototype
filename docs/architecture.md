@@ -178,8 +178,9 @@ asa_research_prototype/
 │       └── _tools/             #     private dev utilities, not part of the public API
 │           ├── custom_logging.py   #       setup_logging() — one stdout handler, app loggers raised
 │           ├── depreport.py        #       dependency table with installed version and release date
+│           ├── paths.py            #       repo_root() — the repository root, found from __file__
 │           └── portcheck.py        #       live Jupyter kernels, port holders, stale-file cleanup
-├── tests/                      # pytest suite — 166 passing, 1 skipped without a robot;
+├── tests/                      # pytest suite — one test skips without a robot;
 │                               #   see the table below for what each file covers
 ├── docs/                       # Project documentation
 │   └── architecture.md         #   this file — entry points, imports, file-by-file walkthrough
@@ -416,6 +417,16 @@ cannot reach them. They ride along in the wheel, which costs nothing at import t
 importable from a notebook with no `sys.path` juggling. `custom_logging.setup_logging()` installs
 a single stdout handler and raises the level on the `asa` and `__main__` logger trees, leaving
 third-party libraries at the root `WARNING`.
+
+`paths.repo_root()` answers *where is the repository* for a notebook that does not know where it
+was started — walking up from `__file__` rather than `Path.cwd()`, and stopping at `uv.lock`
+because a workspace has exactly one lock file where it may have several `pyproject.toml`. It
+raises rather than guessing, so an `asa` installed non-editable fails where the problem is instead
+of returning a plausible wrong root. **The library must never import it**: `nrc_eil.load_tables`
+deliberately refuses a default path on the grounds that where a file lives is a composition root's
+decision, and a `repo_root()` reachable from `asa.perception` would hand every module a way to
+undo that quietly. A notebook *is* a composition root and may use it; `core`, `perception` and
+`affect_model` may not.
 
 ### `src/asa/__main__.py` — the `-m` shim
 
