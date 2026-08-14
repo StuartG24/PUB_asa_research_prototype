@@ -165,7 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
 # A simple chain of gestures to test
 GESTURE_CHAIN = (("BrowRaise", 0.8, 1.0),
                  ("Smile", 0.6, 2.0),
-                 ("Nod", 1.0, 1.0),
+                 ("Nod", 1.0, 5.0),
                  )
 
 
@@ -184,12 +184,11 @@ async def furhat_demo(host: str, client_log_level: int) -> None:
     await session.start()
 
     try:
-        # await session.gesture("Smile", intensity=0.6, duration=2.0)
-        # await session.say("Hello, this is a second test")
         for name, intensity, duration in GESTURE_CHAIN:
             await session.gesture(name, intensity, duration, wait=True)
             await asyncio.sleep(0.5)
 
+        await session.gesture("Smile", intensity=5.0, duration=5.0)
         await session.say("Hello, I hope you are feeling well today. What are your plans?")
     finally:
         await session.stop()
